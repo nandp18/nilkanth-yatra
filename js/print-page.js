@@ -61,7 +61,7 @@ function bindSeg(el, key, onPick) {
     };
   });
 }
-$('sizes').innerHTML = '<span>Size</span>' + Object.entries(FORMATS).map(([k, f]) => `<button data-v="${k}" class="${k === state.fmt ? 'on' : ''}">${f.label}</button>`).join('');
+$('sizes').innerHTML = '<span>Size</span>' + Object.entries(FORMATS).map(([k, f]) => `<button data-v="${k}" class="${k === state.fmt ? 'on' : ''}" title="${f.label}">${f.short}</button>`).join('');
 $('faces').innerHTML = '<span>Title</span>' + Object.entries(TITLE_FACES).map(([k, f]) => `<button data-v="${k}" class="${k === state.face ? 'on' : ''}" style="font-family:${f.family}">${f.label}</button>`).join('');
 bindSeg($('sizes'), 'fmt', render);
 bindSeg($('faces'), 'face', render);

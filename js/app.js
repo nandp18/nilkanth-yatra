@@ -248,6 +248,7 @@ regionRuns.forEach((run) => {
     const s = STOPS[i];
     const li = document.createElement('li');
     li.className = 'stop';
+    li.title = s.alt ? `${s.name} (${s.alt})` : s.name;
     li.innerHTML = `<span class="n">${s.n}</span><span class="t">${s.name}${s.alt ? `<small>${s.alt}</small>` : ''}</span><span class="km">${fmtKm(cumKm[i])}</span>`;
     li.onclick = () => jumpTo(i);
     ui.list.appendChild(li);
@@ -266,6 +267,39 @@ const tlSpans = regionRuns.map((run, k) => {
   ui.tlRegions.appendChild(span);
   return span;
 });
+// Hide (not clip) any region label too long for its segment at the current width
+const fitTimeline = () => tlSpans.forEach((sp) => {
+  sp.classList.remove('tight');
+  sp.classList.toggle('tight', sp.scrollWidth > sp.clientWidth + 1);
+});
+new ResizeObserver(fitTimeline).observe(ui.tlRegions);
+document.fonts.ready.then(fitTimeline);
+
+// Stop rows stay one line: if the alternate name doesn't fit, drop it from the row
+// (it's still in the tooltip and on the card) rather than truncating the main name
+const fitRows = () => listItems.forEach((li) => {
+  const t = li.querySelector('.t');
+  t.classList.remove('no-alt');
+  if (t.scrollWidth > t.clientWidth + 1 && t.querySelector('small')) t.classList.add('no-alt');
+});
+new ResizeObserver(fitRows).observe(ui.list);
+document.fonts.ready.then(fitRows);
+
+// Card scroll affordance: fade the bottom edge while there's more below
+const cardScroll = () => {
+  const c = ui.card;
+  c.classList.toggle('scrolls', c.scrollHeight > c.clientHeight + 1);
+  c.classList.toggle('at-end', c.scrollTop + c.clientHeight >= c.scrollHeight - 2);
+};
+ui.card.addEventListener('scroll', cardScroll, { passive: true });
+new ResizeObserver(cardScroll).observe(ui.card);
+new MutationObserver(cardScroll).observe(ui.card, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+
+// Shrink a single-line heading until it fits, down to a floor; ellipsis beyond that
+function fitText(el, max, min) {
+  el.style.fontSize = `${max}px`;
+  for (let px = max; px > min && el.scrollWidth > el.clientWidth + 1; px--) el.style.fontSize = `${px - 1}px`;
+}
 
 // Markers. MapLibre's terrain occlusion test does a synchronous gl.readPixels per
 // marker every 100 ms; with ~90 markers that stalls the GPU in bursts and makes
@@ -356,6 +390,7 @@ function setActive(i) {
   $('card-num').textContent = s.n;
   $('card-region').textContent = REGIONS[s.region];
   $('card-name').textContent = s.name;
+  fitText($('card-name'), 32, 22);
   $('card-alt').textContent = [s.alt, s.approx && 'location approximate'].filter(Boolean).join(' · ');
   $('card-note').textContent = s.note || '';
   $('card-leg').textContent = i > 0 ? fmtKm(legKm[i - 1]) : '—';

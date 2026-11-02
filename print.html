@@ -11,17 +11,18 @@
 </head>
 <body>
   <header class="toolbar">
-    <a href="./" class="back">← Back to the journey</a>
-    <div class="seg" id="sizes" role="radiogroup" aria-label="Print size"></div>
-    <div class="seg" id="faces" role="radiogroup" aria-label="Title typeface"></div>
-    <span class="status" id="status">Engraving relief…</span>
+    <a href="./" class="back">← Back to the map</a>
+    <div class="controls">
+      <div class="seg" id="sizes" role="radiogroup" aria-label="Print size"></div>
+      <div class="seg" id="faces" role="radiogroup" aria-label="Title typeface"></div>
+    </div>
     <button id="btn-svg" class="ghost" disabled>Download SVG</button>
     <button id="btn-print" class="primary" disabled>Print / Save PDF</button>
   </header>
 
   <main class="sheet-wrap" id="sheet-wrap">
     <div class="sheet" id="sheet"></div>
-    <p class="caption" id="caption"></p>
+    <p class="caption"><span id="caption"></span><span class="status" id="status">Engraving relief…</span></p>
     <p class="hint" id="hint">Vector map: prints sharp at any size. In the print dialog choose <b>Save as PDF</b>, set margins to <b>None</b>, and turn on <b>Background graphics</b>.</p>
   </main>
 

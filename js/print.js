@@ -10,11 +10,11 @@ const EXTENT = { lon0: 66.5, lon1: 97.5, lat0: 5.5, lat1: 35.5 };
 
 export const FORMATS = {
   // Home printers can't print to the edge, so the test sheet sits inside ¼ in margins on Letter
-  letter: { w: 8, h: 10.5, label: '8.5 × 11 in (test)', page: [8.5, 11], margin: 0.25 },
-  '12x16': { w: 12, h: 16, label: '12 × 16 in' },
-  '18x24': { w: 18, h: 24, label: '18 × 24 in' },
-  '24x36': { w: 24, h: 36, label: '24 × 36 in' },
-  a2: { w: 16.54, h: 23.39, label: 'A2' },
+  letter: { w: 8, h: 10.5, label: '8.5 × 11 in (test)', short: '8.5 × 11', page: [8.5, 11], margin: 0.25 },
+  '12x16': { w: 12, h: 16, label: '12 × 16 in', short: '12 × 16' },
+  '18x24': { w: 18, h: 24, label: '18 × 24 in', short: '18 × 24' },
+  '24x36': { w: 24, h: 36, label: '24 × 36 in', short: '24 × 36' },
+  a2: { w: 16.54, h: 23.39, label: 'A2', short: 'A2' },
 };
 
 // Title faces: all period-appropriate for a late-18th-century chart
