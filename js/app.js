@@ -12,7 +12,6 @@ const toRad = (d) => (d * Math.PI) / 180;
 const toDeg = (r) => (r * 180) / Math.PI;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
-const easeSine = (t) => (1 - Math.cos(Math.PI * t)) / 2;
 
 function haversineKm([lon1, lat1], [lon2, lat2]) {
   const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
@@ -265,32 +264,40 @@ const tlSpans = regionRuns.map((run, k) => {
   return span;
 });
 
-// Markers
+// Markers. MapLibre's terrain occlusion test does a synchronous gl.readPixels per
+// marker every 100 ms; with ~90 markers that stalls the GPU in bursts and makes
+// camera motion stutter. Our markers sit on the route, so skip the test.
+class FlatMarker extends maplibregl.Marker {
+  _updateOpacity() {
+    if (this._element.style.opacity !== '') this._element.style.opacity = '';
+  }
+}
+
 const stopMarkers = STOPS.map((s, i) => {
   const el = document.createElement('div');
   el.className = `stop-marker${s.key ? ` key side-${s.side}` : ''}`;
   el.innerHTML = `<div class="disc">${s.n}</div><div class="tip">${s.n} · ${s.name}</div>${s.key ? `<div class="mlabel">${s.key}</div>` : ''}`;
   el.addEventListener('click', (e) => { e.stopPropagation(); jumpTo(i); });
-  return new maplibregl.Marker({ element: el }).setLngLat([s.lon, s.lat]).addTo(map);
+  return new FlatMarker({ element: el }).setLngLat([s.lon, s.lat]).addTo(map);
 });
 CITIES.forEach((c) => {
   const el = document.createElement('div');
   const left = c.side === 'left';
   el.className = `city${c.minor ? ' minor' : ''}${left ? ' left' : ''}`;
   el.innerHTML = `<div class="fade"><i></i><span>${c.name}</span></div>`;
-  new maplibregl.Marker({ element: el, anchor: left ? 'right' : 'left', offset: [left ? 3 : -3, 0] })
+  new FlatMarker({ element: el, anchor: left ? 'right' : 'left', offset: [left ? 3 : -3, 0] })
     .setLngLat([c.lon, c.lat]).addTo(map);
 });
 AREAS.forEach((a) => {
   const el = document.createElement('div');
   el.className = `area ${a.kind}`;
   el.innerHTML = `<span class="fade">${a.name}</span>`;
-  new maplibregl.Marker({ element: el, rotation: a.rotate || 0, rotationAlignment: 'map', pitchAlignment: 'map' })
+  new FlatMarker({ element: el, rotation: a.rotate || 0, rotationAlignment: 'map', pitchAlignment: 'map' })
     .setLngLat([a.lon, a.lat]).addTo(map);
 });
 const travelerEl = document.createElement('div');
 travelerEl.className = 'traveler';
-const traveler = new maplibregl.Marker({ element: travelerEl }).setLngLat(stopCoords[0]).addTo(map);
+const traveler = new FlatMarker({ element: travelerEl }).setLngLat(stopCoords[0]).addTo(map);
 
 // ---------- State ----------
 let progress = 0;          // continuous position along journey, in legs
@@ -456,7 +463,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const legZoom = (km) => clamp(Math.log2(41500 / Math.max(km, 4)), 5, 10);
 const ARRIVE_ZOOM = 9.2;
 // Flatter view when zoomed out, steeper when close to the terrain.
-const pitchFor = (zoom) => lerp(35, 62, clamp((zoom - 5) / 4, 0, 1));
+const pitchFor = (zoom) => lerp(35, 58, clamp((zoom - 5) / 4, 0, 1));
 // Keep the map roughly north-up; sway gently toward the direction of travel.
 const swayBearing = (b) => clamp((((b + 180) % 360) - 180) * 0.3, -25, 25);
 
@@ -464,63 +471,90 @@ function shortestAngle(from, to) {
   return from + ((((to - from) % 360) + 540) % 360) - 180;
 }
 
-// Van Wijk & Nuij "optimal" zoom-and-pan path, the same curve map.flyTo uses.
-// Returns zoom and distance fraction as functions of path parameter s in [0, S].
-const RHO = 1.42;
-function flight(fromLL, toLL, z0, z1) {
-  const a = maplibregl.MercatorCoordinate.fromLngLat(fromLL);
-  const b = maplibregl.MercatorCoordinate.fromLngLat(toLL);
-  const u1 = Math.hypot(b.x - a.x, b.y - a.y) * 512 * 2 ** z0;      // pixels at start zoom
-  const { width, height } = container.getBoundingClientRect();
-  const w0 = Math.max(width, height), w1 = w0 / 2 ** (z1 - z0), rho2 = RHO * RHO;
-  const r = (k) => {
-    const q = (w1 * w1 - w0 * w0 + (k ? -1 : 1) * rho2 * rho2 * u1 * u1) / (2 * (k ? w1 : w0) * rho2 * u1);
-    return Math.log(Math.sqrt(q * q + 1) - q);
-  };
-  const r0 = r(0);
-  let S = (r(1) - r0) / RHO;
-  let w = (x) => Math.cosh(r0) / Math.cosh(r0 + RHO * x);
-  let u = (x) => (w0 * ((Math.cosh(r0) * Math.tanh(r0 + RHO * x) - Math.sinh(r0)) / rho2)) / u1;
-  if (u1 < 1e-6 || !isFinite(S)) {
-    const dir = w1 < w0 ? -1 : 1;
-    S = Math.abs(Math.log(w1 / w0)) / RHO || 0.0001;
-    u = (x) => x / S;
-    w = (x) => Math.exp(dir * RHO * x);
-  }
-  return { S, zoomAt: (x) => z0 + Math.log2(1 / w(x)), fracAt: (x) => clamp(u(x), 0, 1) };
+// ---------- Continuous playback engine ----------
+// One rAF loop drives the whole journey. The traveler moves at a constant
+// *screen* speed (so zooming out on long legs covers ground faster), eases into
+// and out of each tirth, and zoom/bearing follow critically damped springs, so
+// nothing changes velocity abruptly, including across stop boundaries.
+
+const SCREEN_PX_PER_S = 170;       // traveler speed on screen at 1x
+const DWELL_S = 1.2;               // pause at each tirth at 1x
+
+// Exact critically damped spring step
+function spring(x, v, target, omega, dt) {
+  const d = x - target, e = Math.exp(-omega * dt);
+  return [target + (d + (v + omega * d) * dt) * e, (v - omega * (v + omega * d) * dt) * e];
+}
+const pxPerKm = (zoom, lat) => (512 * 2 ** zoom) / (40075 * Math.cos(toRad(lat)));
+const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+
+const engine = { v: 0, z: 0, zv: 0, b: 0, bv: 0, dwell: 0, last: 0 };
+
+// Camera zoom we want at this point: pulled back to frame long legs while
+// cruising, settling to ARRIVE_ZOOM near each tirth.
+function targetZoom(i, f) {
+  const L = legKm[i];
+  const cruise = Math.min(ARRIVE_ZOOM, legZoom(L * 0.55));
+  const near = Math.min(f * L, (1 - f) * L);
+  return lerp(ARRIVE_ZOOM, cruise, smoothstep(0, clamp(L * 0.3, 2, 140), near));
 }
 
-// Walk from current progress to the next whole stop. The traveler's ground position
-// follows the same curve as the camera, so it stays centred and screen speed stays even.
-function walkLeg() {
-  return new Promise((resolve) => {
-    const i = Math.floor(progress + 1e-6);
-    if (i >= LAST) return resolve();
-    const f0 = legDistFrac(i, progress - i);
-    const follow = ui.follow.checked;
-    const fl = follow ? flight(pointAt(progress), stopCoords[i + 1], map.getZoom(), ARRIVE_ZOOM) : null;
-    const dur = (fl ? clamp(700 + 1150 * fl.S, 1800, 8000) : clamp(1500 + legKm[i] * 3, 1800, 6000)) / speedVal;
-    const b0 = map.getBearing();
-    const b1 = shortestAngle(b0, swayBearing(bearing(stopCoords[i], stopCoords[i + 1])));
-    const t0 = performance.now();
+function tick(now) {
+  if (!playing) return;
+  const dt = Math.min(0.05, (now - engine.last) / 1000);
+  engine.last = now;
+  const sp = speedVal;
+  const follow = ui.follow.checked;
 
-    const frame = (now) => {
-      if (!playing) return resolve();
-      const t = clamp((now - t0) / dur, 0, 1);
-      const k = easeSine(t);
-      const x = fl ? k * fl.S : 0;
-      const f = f0 + (1 - f0) * (fl ? fl.fracAt(x) : k);
-      const p = t >= 1 ? i + 1 : i + legTAt(i, f);
-      setProgress(p);
-      if (fl && ui.follow.checked) {
-        const zoom = fl.zoomAt(x);
-        map.jumpTo({ center: pointAt(p), zoom, bearing: lerp(b0, b1, k), pitch: pitchFor(zoom) });
-      }
-      if (t < 1) raf = requestAnimationFrame(frame);
-      else resolve();
-    };
-    raf = requestAnimationFrame(frame);
-  });
+  const i = Math.min(Math.floor(progress + 1e-9), LAST - 1);
+  const f = legDistFrac(i, progress - i);
+  const [, lat] = pointAt(progress);
+
+  // Zoom spring (also used for pacing when the camera isn't following)
+  if (follow) {
+    [engine.z, engine.zv] = spring(engine.z, engine.zv, targetZoom(i, f), 1.5 * Math.sqrt(sp), dt);
+  } else {
+    engine.z = map.getZoom();
+  }
+
+  // Ground speed from constant screen speed, slowing over the last ~110 px before a stop
+  let vTarget = 0;
+  if (engine.dwell > 0) {
+    engine.dwell -= dt;
+  } else {
+    const k = pxPerKm(engine.z, lat);
+    const pxLeft = (1 - f) * legKm[i] * k;
+    vTarget = ((SCREEN_PX_PER_S * sp) / k) * clamp(pxLeft / 110, 0.06, 1);
+  }
+  [engine.v] = spring(engine.v, 0, vTarget, 4 * Math.sqrt(sp), dt);
+
+  // Advance along the leg
+  let p = progress;
+  if (engine.v > 1e-6 && engine.dwell <= 0) {
+    const f2 = f + (engine.v * dt) / legKm[i];
+    if (f2 >= 1) {
+      p = i + 1;
+      engine.v = 0;
+      engine.dwell = p >= LAST ? 0 : DWELL_S / sp;
+      setActive(p);
+    } else {
+      p = i + legTAt(i, f2);
+    }
+  }
+  setProgress(p);
+
+  if (follow) {
+    const legB = swayBearing(bearing(stopCoords[i], stopCoords[i + 1]));
+    const drift = engine.dwell > 0 ? 2.5 * dt : 0;          // slow orbit while dwelling
+    engine.b += drift;
+    [engine.b, engine.bv] = spring(engine.b, engine.bv, shortestAngle(engine.b, legB), 0.9, dt);
+    map.jumpTo({ center: pointAt(p), zoom: engine.z, bearing: engine.b, pitch: pitchFor(engine.z) });
+  }
+  // Render now, in the same frame as the DOM markers moved, instead of next frame
+  map.redraw();
+
+  if (p >= LAST) { setPlaying(false); return; }
+  raf = requestAnimationFrame(tick);
 }
 
 const moveEnd = () => new Promise((r) => map.once('moveend', r));
@@ -528,21 +562,17 @@ const moveEnd = () => new Promise((r) => map.once('moveend', r));
 async function play() {
   if (progress >= LAST) { jumpTo(0, { fly: false }); await sleep(300); }
   setPlaying(true);
-  if (ui.follow.checked && Math.abs(map.getZoom() - ARRIVE_ZOOM) > 0.5) {
+  const c = map.project(pointAt(progress));
+  const { width, height } = container.getBoundingClientRect();
+  const offCentre = Math.hypot(c.x - width / 2, c.y - height / 2) > 40;
+  if (ui.follow.checked && (offCentre || Math.abs(map.getZoom() - ARRIVE_ZOOM) > 0.4)) {
     const done = moveEnd();
     map.flyTo({ center: pointAt(progress), zoom: ARRIVE_ZOOM, pitch: pitchFor(ARRIVE_ZOOM), bearing: 0, duration: 2600 / speedVal, essential: true });
     await done;
+    if (!playing) return;
   }
-  while (playing && progress < LAST) {
-    await walkLeg();
-    if (!playing) break;
-    setActive(Math.round(progress));
-    const dwell = 1300 / speedVal;
-    // Slow drift while paused at a tirth, so the camera never fully freezes
-    if (ui.follow.checked) map.easeTo({ bearing: map.getBearing() + 3, duration: dwell, easing: (x) => x, essential: true });
-    await sleep(dwell);
-  }
-  setPlaying(false);
+  Object.assign(engine, { v: 0, z: map.getZoom(), zv: 0, b: map.getBearing(), bv: 0, dwell: 0.25, last: performance.now() });
+  raf = requestAnimationFrame(tick);
 }
 
 function jumpTo(i, { fly = true } = {}) {
