@@ -268,8 +268,8 @@ const tlSpans = regionRuns.map((run, k) => {
 // Markers
 const stopMarkers = STOPS.map((s, i) => {
   const el = document.createElement('div');
-  el.className = 'stop-marker';
-  el.innerHTML = `<div class="disc">${s.n}</div><div class="tip">${s.name}</div>`;
+  el.className = `stop-marker${s.key ? ` key side-${s.side}` : ''}`;
+  el.innerHTML = `<div class="disc">${s.n}</div><div class="tip">${s.n} · ${s.name}</div>${s.key ? `<div class="mlabel">${s.key}</div>` : ''}`;
   el.addEventListener('click', (e) => { e.stopPropagation(); jumpTo(i); });
   return new maplibregl.Marker({ element: el }).setLngLat([s.lon, s.lat]).addTo(map);
 });
@@ -277,14 +277,14 @@ CITIES.forEach((c) => {
   const el = document.createElement('div');
   const left = c.side === 'left';
   el.className = `city${c.minor ? ' minor' : ''}${left ? ' left' : ''}`;
-  el.innerHTML = `<i></i><span>${c.name}</span>`;
+  el.innerHTML = `<div class="fade"><i></i><span>${c.name}</span></div>`;
   new maplibregl.Marker({ element: el, anchor: left ? 'right' : 'left', offset: [left ? 3 : -3, 0] })
     .setLngLat([c.lon, c.lat]).addTo(map);
 });
 AREAS.forEach((a) => {
   const el = document.createElement('div');
   el.className = `area ${a.kind}`;
-  el.textContent = a.name;
+  el.innerHTML = `<span class="fade">${a.name}</span>`;
   new maplibregl.Marker({ element: el, rotation: a.rotate || 0, rotationAlignment: 'map', pitchAlignment: 'map' })
     .setLngLat([a.lon, a.lat]).addTo(map);
 });
@@ -303,7 +303,7 @@ let raf = null;
 let lastUi = 0;            // throttle for panel text during playback
 let lastWx = 0;            // throttle for weather sampling
 let lastCut = -1;          // last gradient cut-off drawn
-let wx = 'clear';          // current weather condition
+let wx = '';               // current weather condition ('' forces first paint)
 
 function setProgress(p) {
   progress = clamp(p, 0, LAST);

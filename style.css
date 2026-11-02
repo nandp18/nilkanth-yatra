@@ -182,24 +182,25 @@ input[type=range].thin::-moz-range-thumb { width: 10px; height: 10px; border-rad
 .maplibregl-ctrl-bottom-right { bottom: 84px; }
 .maplibregl-ctrl-attrib { font: 10px var(--sans); background: rgba(255,255,255,.8) !important; border-radius: 6px; }
 
-/* ---------- Stop markers ---------- */
+/* ---------- Stop markers ----------
+   Near/mid zoom: numbered discs. Overview (.z-far): small route dots, with
+   name labels only on milestone stops. */
 .stop-marker { width: var(--ms); height: var(--ms); cursor: pointer; }
 .stop-marker .disc {
   position: relative; width: 100%; height: 100%; border-radius: 50%;
   display: grid; place-items: center;
   font: 600 calc(var(--ms) * .5)/1 var(--sans); letter-spacing: -.02em;
-  background: #fff; color: var(--ink-2); border: 1.5px solid var(--ink);
-  box-shadow: 0 1px 3px rgba(0,0,0,.35);
-  transition: background .35s, color .35s, transform .3s var(--ease), opacity .35s;
-  opacity: .85;
+  background: #fff; color: #6b6359; border: 1.25px solid #a89f92;
+  box-shadow: 0 1px 2px rgba(30,26,22,.18), 0 2px 6px rgba(30,26,22,.10);
+  transition: background .35s, color .35s, border-color .35s, transform .3s var(--ease), width .3s, height .3s;
 }
-.stop-marker.visited .disc { background: var(--gold); color: var(--ink); opacity: 1; animation: pop .45s var(--ease); }
-.stop-marker.active .disc { background: var(--ink); color: var(--gold); border-color: #fff; transform: scale(1.4); opacity: 1; }
+.stop-marker.visited .disc { background: var(--gold); border-color: #c4950f; color: var(--ink); animation: pop .45s var(--ease); }
+.stop-marker.active .disc { background: var(--ink); color: var(--gold); border-color: #fff; border-width: 1.5px; transform: scale(1.4); }
 .stop-marker.active .disc::after {
   content: ''; position: absolute; inset: -2px; border-radius: 50%;
   border: 2px solid var(--saffron); animation: ripple 2.2s var(--ease) infinite;
 }
-.stop-marker:hover .disc { transform: scale(1.25); opacity: 1; }
+.stop-marker:hover .disc { transform: scale(1.25); }
 .stop-marker.active:hover .disc { transform: scale(1.5); }
 .stop-marker .tip {
   position: absolute; left: 50%; bottom: calc(100% + 10px); transform: translate(-50%, 4px);
@@ -208,8 +209,30 @@ input[type=range].thin::-moz-range-thumb { width: 10px; height: 10px; border-rad
   transition: opacity .15s, transform .15s;
 }
 .stop-marker:hover .tip { opacity: 1; transform: translate(-50%, 0); }
+.stop-marker .mlabel { display: none; }
 @keyframes pop { 40% { transform: scale(1.35); } }
 @keyframes ripple { from { transform: scale(1); opacity: .9; } to { transform: scale(2.6); opacity: 0; } }
+
+/* Overview: dots, not numbers */
+.z-far .stop-marker { width: 7px; height: 7px; }
+.z-far .stop-marker.key { width: 9px; height: 9px; }
+.z-far .stop-marker .disc { color: transparent; border-width: 1.25px; box-shadow: 0 0 0 1.5px rgba(255,255,255,.85); }
+.z-far .stop-marker:not(.visited) .disc { background: #fff; border-color: #8b8378; }
+.z-far .stop-marker.key .disc { border-color: var(--ink); }
+.z-far .stop-marker.visited .disc { border-color: #b8890c; }
+.z-far .stop-marker.active .disc { background: var(--saffron); border-color: #fff; transform: scale(1.6); }
+.z-far .stop-marker.active .disc::after { inset: -3px; border-width: 1.5px; }
+.z-far .stop-marker:hover .disc { transform: scale(1.5); }
+.z-far .stop-marker .mlabel {
+  display: block; position: absolute; white-space: nowrap; pointer-events: none;
+  font: 400 14px/1 var(--serif); color: var(--ink); letter-spacing: .01em;
+  text-shadow: 0 0 2px #fff, 0 0 4px #fff, 0 0 8px rgba(255,255,255,.9);
+}
+.side-right .mlabel { left: calc(100% + 6px); top: 50%; transform: translateY(-52%); }
+.side-left .mlabel { right: calc(100% + 6px); top: 50%; transform: translateY(-52%); }
+.side-top .mlabel { left: 50%; bottom: calc(100% + 5px); transform: translateX(-50%); }
+.side-bottom .mlabel { left: 50%; top: calc(100% + 5px); transform: translateX(-50%); }
+.theme-satellite.z-far .stop-marker .mlabel { color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.85); }
 
 .traveler { width: 26px; height: 26px; pointer-events: none; display: grid; place-items: center; }
 .traveler::before {
@@ -224,11 +247,14 @@ input[type=range].thin::-moz-range-thumb { width: 10px; height: 10px; border-rad
 @keyframes breathe { 50% { transform: scale(1.5); opacity: .6; } }
 
 /* ---------- Labels ---------- */
-.city { display: flex; align-items: center; gap: 5px; pointer-events: none; transition: opacity .4s; }
-.city.left { flex-direction: row-reverse; }
+.city { pointer-events: none; }
+.city .fade { display: flex; align-items: center; gap: 5px; }
+/* MapLibre writes inline opacity on marker roots (terrain occlusion), so zoom fades act on .fade */
+.fade { transition: opacity .4s; }
+.city.left .fade { flex-direction: row-reverse; }
 .city i { width: 5px; height: 5px; background: var(--ink); border: 1px solid #fff; flex: 0 0 auto; }
 .city span { font: 600 9.5px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; }
-.area { pointer-events: none; white-space: nowrap; transition: opacity .5s; text-align: center; }
+.area { pointer-events: none; white-space: nowrap; text-align: center; }
 .area.country { font: 400 14px/1 var(--serif); letter-spacing: .38em; text-transform: uppercase; }
 .area.country.xl { font-size: 30px; letter-spacing: .6em; }
 .area.sea { font: italic 400 16px/1 var(--serif); letter-spacing: .12em; }
@@ -240,14 +266,14 @@ input[type=range].thin::-moz-range-thumb { width: 10px; height: 10px; border-rad
 .theme-atlas .area.sea { color: rgba(30, 64, 92, .55); }
 .theme-atlas .area.range { color: rgba(90, 62, 38, .5); }
 .theme-satellite .city span { color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
-.theme-satellite .city.left { flex-direction: row-reverse; }
+.theme-satellite .city.left .fade { flex-direction: row-reverse; }
 .city i { background: #fff; border-color: var(--ink); }
 .theme-satellite .area { color: rgba(255,255,255,.88); text-shadow: 0 1px 8px rgba(0,0,0,.6); }
 .theme-satellite .stop-marker .disc { box-shadow: 0 1px 6px rgba(0,0,0,.6); }
 
 /* zoom-dependent label visibility */
-.z-mid .area, .z-near .area { opacity: 0; }
-.z-far .city.minor { opacity: 0; }
+.z-mid .area .fade, .z-near .area .fade { opacity: 0; }
+.z-far .city .fade { opacity: 0; }
 
 /* ============================================================
    Stop card
