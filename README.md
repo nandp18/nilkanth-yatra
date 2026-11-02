@@ -32,7 +32,7 @@ The middle dates are **estimates** (shown with ≈). They spread the seven years
 - compass rose and scale bar
 - the 65 tirths keyed in the Indian Ocean, as on the original map
 
-Formats are **12 × 16 in**, **18 × 24 in**, **24 × 36 in** and **A2**. Each one lays out separately:
+Formats are **12 × 16 in**, **18 × 24 in**, **24 × 36 in** and **A2**, plus an **8.5 × 11 in test** sheet that prints inside ¼ in margins on a home printer (`print.html?size=letter`). Every format carries the same content: the stops named on the 18 × 24 in reference sheet are named on all of them. Each one lays out separately:
 - Type is sized for viewing distance.
 - As many stop names are placed as fit without colliding.
 - The map narrows if the sheet is short.

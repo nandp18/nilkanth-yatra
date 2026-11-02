@@ -1,8 +1,10 @@
 // Print edition page: format + title pickers, preview at relative physical size, export.
-import { FORMATS, TITLE_FACES, relief, buildSheet, embedFonts } from './print.js';
+import { FORMATS, TITLE_FACES, REFERENCE, relief, buildSheet, embedFonts } from './print.js';
+import * as printMod from './print.js';
 
 const $ = (id) => document.getElementById(id);
-const state = { fmt: '18x24', face: 'didone' };
+const params = new URLSearchParams(location.search);
+const state = { fmt: FORMATS[params.get('size')] ? params.get('size') : '18x24', face: 'didone' };
 const pageStyle = document.createElement('style');
 document.head.appendChild(pageStyle);
 let current = '';
@@ -19,8 +21,14 @@ function sizePreview() {
   $('sheet').style.width = `${w}px`;
   $('sheet').style.aspectRatio = `${f.w} / ${f.h}`;
   const z = zoomFor(f), dpi = Math.round((256 * 2 ** z * (31 / 360)) / (f.w * 0.877));
-  $('caption').textContent = `${f.label} · ${(f.w * 2.54).toFixed(1)} × ${(f.h * 2.54).toFixed(1)} cm · relief at about ${dpi} dpi`;
-  pageStyle.textContent = `@page { size: ${f.w}in ${f.h}in; margin: 0; }`;
+  const [pw, ph] = f.page || [f.w, f.h];
+  $('caption').textContent = f.page
+    ? `${f.label} · prints ${f.w} × ${f.h} in inside ${f.margin} in margins · type is ${Math.round((f.w / 18) * 100)}% of the 18 × 24 in size`
+    : `${f.label} · ${(f.w * 2.54).toFixed(1)} × ${(f.h * 2.54).toFixed(1)} cm · relief at about ${dpi} dpi`;
+  pageStyle.textContent = `@page { size: ${pw}in ${ph}in; margin: ${f.margin || 0}in; }`;
+  $('hint').innerHTML = f.page
+    ? 'Test print for a home printer: choose <b>Letter</b> paper, margins <b>Default</b>, scale <b>100%</b>, and turn on <b>Background graphics</b>. Check colour and layout; the key is small at this size.'
+    : 'Vector map: prints sharp at any size. In the print dialog choose <b>Save as PDF</b>, set margins to <b>None</b>, and turn on <b>Background graphics</b>.';
 }
 
 async function render() {
@@ -32,7 +40,12 @@ async function render() {
   const rel = await relief(zoomFor(f), (p) => { if (my === seq) $('status').textContent = `Engraving relief… ${Math.round(p * 100)}%`; });
   await document.fonts.ready;
   if (my !== seq) return;
-  current = buildSheet(f, state.face, rel);
+  // Name exactly the stops that fit on the reference sheet, at every size
+  const ref = await relief(zoomFor(FORMATS[REFERENCE]));
+  buildSheet(FORMATS[REFERENCE], state.face, ref);
+  const names = printMod.lastNamed;
+  if (my !== seq) return;
+  current = buildSheet(f, state.face, rel, names);
   $('sheet').innerHTML = current;
   $('status').textContent = 'Ready to print';
   $('btn-print').disabled = $('btn-svg').disabled = false;

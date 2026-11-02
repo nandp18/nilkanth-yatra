@@ -9,6 +9,8 @@ const DEM_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}
 const EXTENT = { lon0: 66.5, lon1: 97.5, lat0: 5.5, lat1: 35.5 };
 
 export const FORMATS = {
+  // Home printers can't print to the edge, so the test sheet sits inside ¼ in margins on Letter
+  letter: { w: 8, h: 10.5, label: '8.5 × 11 in (test)', page: [8.5, 11], margin: 0.25 },
   '12x16': { w: 12, h: 16, label: '12 × 16 in' },
   '18x24': { w: 18, h: 24, label: '18 × 24 in' },
   '24x36': { w: 24, h: 36, label: '24 × 36 in' },
@@ -165,25 +167,31 @@ const FELL = "$px 'IM Fell English'", FELL_I = "italic $px 'IM Fell English'", F
 const boxHit = (a, b) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
 
 // ---------- Compose one sheet ----------
-export function buildSheet(fmt, faceKey, reliefData) {
+// The stops named on the reference sheet (18 × 24 in). Other formats name exactly
+// these, so every size carries the same content.
+export const REFERENCE = '18x24';
+export let lastNamed = null;
+
+export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
   const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100);
   const k = W / 1800;                        // geometric scale vs. the 18 in design
-  const ts = k ** 0.72;                      // type grows more slowly than the sheet
+  const ts = k;                              // everything scales with the sheet: same content at every size
   const fs = (u) => f1(u * ts);
   const face = TITLE_FACES[faceKey];
 
-  // Vertical layout: title block, map, legend + colophon, then credits at the foot.
-  // If the stack is too tall the map narrows; spare height becomes the chronicle,
-  // or is shared above and below so the composition sits centred.
+  // Vertical layout: title block, map, legend + colophon, chronicle, credits.
+  // Every format carries the same content: if the sheet is too short for the
+  // chronicle's minimum height, the map narrows to make room; extra height
+  // on taller sheets enlarges the chronicle.
   const yCredit = H - 72 * k;
   const titleBlock = fs(62) + fs(150 * Math.min(1.08, face.scale)) + fs(56) + fs(26) + fs(44) + fs(50);
   const footBlock = fs(84) + fs(66) + fs(50);
   let mapW = W - 220 * k;
   let slack = yCredit - fs(30) - (70 * k + titleBlock + mapW * MAP_RATIO + footBlock);
-  if (slack < 0) { mapW += slack / MAP_RATIO; slack = 0; }
-  const withChronicle = slack >= fs(190);
-  const chronH = withChronicle ? slack : 0;
-  const top = 70 * k + (withChronicle ? 0 : slack / 2);
+  const CHRON_MIN = fs(215);
+  if (slack < CHRON_MIN) { mapW -= (CHRON_MIN - slack) / MAP_RATIO; slack = CHRON_MIN; }
+  const chronH = slack;
+  const top = 70 * k;
   const yEyebrow = top + fs(62), yTitle = yEyebrow + fs(150 * Math.min(1.08, face.scale)), ySub = yTitle + fs(56);
   const yRule = ySub + fs(26), yFacts = yRule + fs(44);
   const F = { x: (W - mapW) / 2, w: mapW };
@@ -231,7 +239,7 @@ export function buildSheet(fmt, faceKey, reliefData) {
   // area labels: [text, lon, lat, class, size, font, tracking, rotate]
   const AREA = [
     ['Arabian Sea', 70.2, 17.2, 'sea', 36, FELL_I, 8], ['Bay of Bengal', 90.1, 18.45, 'sea', 36, FELL_I, 8],
-    ['Indian Ocean', 77.6, 6.6, 'sea', 36, FELL_I, 8],
+    ['Indian Ocean', 77.0, 6.15, 'sea', 36, FELL_I, 8],
     ['Himalaya', 88.4, 29.25, 'range', 36, FELL_SC, 28, -8], ['Tibet', 88.2, 33.2, 'region', 28, FELL_SC, 13],
     ['Nepal', 81.25, 28.95, 'region', 20, FELL_SC, 8], ['Bengal', 87.15, 23.75, 'region', 20, FELL_SC, 8],
     ['Deccan', 78.6, 18.5, 'region', 28, FELL_SC, 13], ['Gujarat', 71.2, 23.6, 'region', 20, FELL_SC, 8],
@@ -262,31 +270,40 @@ export function buildSheet(fmt, faceKey, reliefData) {
   const PREF = { 1: 'right', 8: 'top' };
   const order = STOPS.map((_, i) => i).sort((a, b) => (STOPS[b].key ? 1 : 0) - (STOPS[a].key ? 1 : 0) || a - b);
   let names = '';
+  const named = new Set();
   for (const i of order) {
+    if (onlyNames && !onlyNames.has(i)) continue;
     const s = STOPS[i], d = discs[i];
     const major = !!s.key;
     const text = s.key || s.name.split(' – ')[0].split(' & ')[0].replace(/ (Mandir|Kovil|Swami)$/, '');
-    const size = fs(major ? 21 : 15.5);
-    const wdt = textWidth(text, FELL_I, size), hgt = size * 0.92, gap = R + fs(5);
-    const cand = {
-      right: [d.x + gap, d.y - hgt * 0.62, d.x + gap + wdt, d.y + hgt * 0.38, 'start', d.x + gap, d.y + hgt * 0.3],
-      left: [d.x - gap - wdt, d.y - hgt * 0.62, d.x - gap, d.y + hgt * 0.38, 'end', d.x - gap, d.y + hgt * 0.3],
-      top: [d.x - wdt / 2, d.y - gap - hgt, d.x + wdt / 2, d.y - gap, 'middle', d.x, d.y - gap - hgt * 0.15],
-      bottom: [d.x - wdt / 2, d.y + gap, d.x + wdt / 2, d.y + gap + hgt, 'middle', d.x, d.y + gap + hgt * 0.8],
-    };
-    const first = PREF[s.n] || s.side;
-    const sides = [...new Set([first, 'right', 'left', 'top', 'bottom'].filter(Boolean))];
-    for (const side of sides) {
-      const b = cand[side];
-      const box = b.slice(0, 4);
-      if (obstacles.some((o) => boxHit(box, o)) || placed.some((o) => boxHit(box, o)) ||
-          discBoxes.some((o) => o[4] !== i && boxHit(box, o))) continue;
-      placed.push(box);
-      names += `<text class="${major ? 'place' : 'place minor'}" x="${f1(b[5])}" y="${f1(b[6])}" text-anchor="${b[4]}" style="font-size:${size}px">${esc(text)}</text>`;
-      break;
+    // Reference names must appear on every sheet: if no side fits, retry a little smaller
+    const sizes = onlyNames ? [1, 0.88, 0.78] : [1];
+    for (const shrink of sizes) {
+      if (named.has(i)) break;
+      const size = f1(fs(major ? 21 : 15.5) * shrink);
+      const wdt = textWidth(text, FELL_I, size), hgt = size * 0.92, gap = R + fs(5);
+      const cand = {
+        right: [d.x + gap, d.y - hgt * 0.62, d.x + gap + wdt, d.y + hgt * 0.38, 'start', d.x + gap, d.y + hgt * 0.3],
+        left: [d.x - gap - wdt, d.y - hgt * 0.62, d.x - gap, d.y + hgt * 0.38, 'end', d.x - gap, d.y + hgt * 0.3],
+        top: [d.x - wdt / 2, d.y - gap - hgt, d.x + wdt / 2, d.y - gap, 'middle', d.x, d.y - gap - hgt * 0.15],
+        bottom: [d.x - wdt / 2, d.y + gap, d.x + wdt / 2, d.y + gap + hgt, 'middle', d.x, d.y + gap + hgt * 0.8],
+      };
+      const first = PREF[s.n] || s.side;
+      const sides = [...new Set([first, 'right', 'left', 'top', 'bottom'].filter(Boolean))];
+      for (const side of sides) {
+        const b = cand[side];
+        const box = b.slice(0, 4);
+        if (obstacles.some((o) => boxHit(box, o)) || placed.some((o) => boxHit(box, o)) ||
+            discBoxes.some((o) => o[4] !== i && boxHit(box, o))) continue;
+        placed.push(box);
+        named.add(i);
+        names += `<text class="${major ? 'place' : 'place minor'}" x="${f1(b[5])}" y="${f1(b[6])}" text-anchor="${b[4]}" style="font-size:${size}px">${esc(text)}</text>`;
+        break;
+      }
     }
   }
 
+  lastNamed = named;
   let marks = '';
   for (const d of discs) {
     if (Math.hypot(d.x - d.ax, d.y - d.ay) > R * 0.9) {
@@ -424,7 +441,7 @@ export function buildSheet(fmt, faceKey, reliefData) {
     <text class="legend" x="${fs(722)}" y="${fs(6)}" style="font-size:${fs(19)}px">Beginning &amp; end of the journey</text>
   </g>
   <text class="colophon" x="${midX}" y="${f1(yColophon)}" style="font-size:${fs(21)}px">Departed Ayodhya on Ashadh sud 10, Samvat 1849 · Arrived at Loj on Shravan vad 6, Samvat 1856</text>
-  ${withChronicle ? chronicle(F.x, yColophon + fs(36), F.w, chronH - fs(20), fs, ts) : ''}
+  ${chronicle(F.x, yColophon + fs(36), F.w, chronH - fs(20), fs, ts)}
   <text class="credit" x="${f1(F.x)}" y="${f1(yCredit)}" style="font-size:${fs(13.5)}px">Relief engraved from Mapzen Terrain Tiles · Coastlines &amp; rivers: Natural Earth · Positions of tirths are approximate</text>
   <text class="credit" x="${f1(F.x + F.w)}" y="${f1(yCredit)}" text-anchor="end" style="font-size:${fs(13.5)}px">${esc(fmt.label)} · Mercator projection · Drawn ${new Date().getFullYear()}</text>
 
