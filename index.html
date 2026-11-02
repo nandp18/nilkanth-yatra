@@ -81,6 +81,7 @@
   </aside>
 
   <main id="map"></main>
+  <canvas id="dome" hidden aria-hidden="true"></canvas>
   <div id="fx-layer" aria-hidden="true"><div id="fx-tint"></div><canvas id="fx"></canvas></div>
 
   <article id="card" class="hidden" aria-live="polite">
@@ -98,6 +99,28 @@
       <div class="meta">
         <div><b id="card-leg">—</b><small>from previous</small></div>
         <div><b id="card-total">0 km</b><small>into the journey</small></div>
+      </div>
+      <div class="sky-sec">
+        <button class="sky-toggle" id="sky-toggle" aria-expanded="false">
+          <svg viewBox="0 0 16 16"><path d="M13 9.6A5.6 5.6 0 0 1 6.4 3a5.6 5.6 0 1 0 6.6 6.6z" /></svg>
+          <span>Night sky</span><span class="sky-date" id="sky-date"></span>
+          <svg class="chev" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4" /></svg>
+        </button>
+        <div class="sky-body">
+          <canvas id="sky-chart" class="sky-chart" aria-label="Star chart for this town and night"></canvas>
+          <div class="sky-facts">
+            <div><b id="sky-tithi">—</b><small>Tithi (lunar day)</small></div>
+            <div><b id="sky-nak">—</b><small>Moon's nakshatra</small></div>
+          </div>
+          <label class="sky-time">
+            <span>Dusk</span>
+            <input type="range" id="sky-hour" class="thin" min="18.5" max="29.5" step="0.25" value="21" />
+            <span>Dawn</span>
+            <output id="sky-hour-out">9:00 pm</output>
+          </label>
+          <button id="btn-lookup" class="lookup">Look up ↑</button>
+          <p class="sky-note" id="sky-note"></p>
+        </div>
       </div>
     </div>
   </article>

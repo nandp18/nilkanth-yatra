@@ -1,5 +1,6 @@
 import { STOPS, CITIES, AREAS, REGIONS, REGION_SHORT } from './stops.js';
 import { WeatherFX, WEATHER_LABEL, WEATHER_SKY, elevationAt } from './weather.js';
+import { buildChronology } from './chronology.js';
 
 const DEM_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
@@ -96,6 +97,8 @@ STOPS.forEach((s, i) => {
   if (last && last.region === s.region) last.end = i;
   else regionRuns.push({ region: s.region, start: i, end: i });
 });
+
+const CHRONO = buildChronology(legKm);
 
 // ---------- Map ----------
 const demSource = new mlcontour.DemSource({ url: DEM_URL, encoding: 'terrarium', maxzoom: 12, worker: true });
@@ -360,6 +363,7 @@ function setActive(i) {
   ui.card.classList.remove('hidden', 'swap');
   void ui.card.offsetWidth; // restart the entrance animation
   ui.card.classList.add('swap');
+  updateSkyCard();
 }
 
 function drawWalked() {
@@ -414,6 +418,7 @@ function classify(elev, stop) {
 let wxSeq = 0;
 let lastElev = null;
 async function updateWeather() {
+  if (lookMode) return;
   const seq = ++wxSeq;
   const elev = await elevationAt(DEM_URL, pointAt(progress));
   if (seq !== wxSeq) return;                       // a newer sample superseded this one
@@ -438,6 +443,210 @@ function applySky() {
 }
 
 const line = (coords) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } });
+
+// ---------- Night sky ----------
+// sky.js (astronomy-engine + a 200 KB star catalog) loads on first use.
+let skyMod = null, skyLoading = null;
+const loadSky = () => (skyLoading ||= import('./sky.js').then((m) => (skyMod = m)));
+let skyOpen = false;
+let lookMode = false;
+let skyState = null;
+let dayPaint = null;
+const LOOK_PITCH = 104;          // >90 looks above the horizon
+const LOOK_FOV = 60, MAP_FOV = 36.87;   // wider, closer to the eye, while standing in a town
+const dome = $('dome');
+map.getCanvasContainer().insertBefore(dome, map.getCanvas());   // behind the map: terrain hides stars
+
+const fmtDate = (d) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const fmtHour = (h) => {
+  const hh = Math.floor(h) % 24, mm = Math.round((h % 1) * 60);
+  return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'am' : 'pm'}`;
+};
+
+let skySeq = 0;
+async function updateSkyCard() {
+  const i = active;
+  if (i < 0) return;
+  const c = CHRONO[i];
+  $('sky-date').textContent = `${c.kind === 'estimated' ? '≈ ' : ''}${fmtDate(c.date)}`;
+  if (!skyOpen && !lookMode) return;
+  const seq = ++skySeq;
+  const sk = await loadSky();
+  if (seq !== skySeq) return;
+  const s = STOPS[i];
+  const hour = parseFloat($('sky-hour').value);
+  skyState = sk.computeSky(sk.localNight(c.date, s.lon, hour), s.lat, s.lon);
+  $('sky-tithi').textContent = `${skyState.tithi.paksha} ${skyState.tithi.day}`;
+  $('sky-nak').textContent = skyState.nakshatra;
+  $('sky-hour-out').textContent = fmtHour(hour);
+  $('sky-note').textContent = c.kind === 'traditional'
+    ? 'Date from tradition. Positions computed for that night.'
+    : `Date estimated from the route${c.stay ? `, including a ~${c.stay}-day stay` : ''}. Positions computed for that night.`;
+  if (skyOpen && !lookMode) sk.drawChart($('sky-chart'), skyState);
+  if (lookMode) { applyNightPaint(); map.triggerRepaint(); }
+}
+
+$('sky-toggle').onclick = () => {
+  skyOpen = !skyOpen;
+  ui.card.classList.toggle('sky-open', skyOpen);
+  $('sky-toggle').setAttribute('aria-expanded', skyOpen);
+  updateSkyCard();
+};
+const hourInput = $('sky-hour');
+const setHourFill = () => hourInput.style.setProperty('--p', `${((hourInput.value - hourInput.min) / (hourInput.max - hourInput.min)) * 100}%`);
+let hourRaf = 0;
+hourInput.oninput = () => {
+  setHourFill();
+  cancelAnimationFrame(hourRaf);
+  hourRaf = requestAnimationFrame(updateSkyCard);
+};
+setHourFill();
+
+// Night look for the terrain; brightness follows the Moon
+const NIGHT = {
+  bg: { 'background-color': '#0a1220' },
+  water: { 'fill-color': '#0c1830', 'fill-opacity': 0.85 },
+  rivers: { 'line-color': '#1f3352' },
+  hillshade: { 'hillshade-exaggeration': 0.55, 'hillshade-shadow-color': '#000000', 'hillshade-highlight-color': '#53627c', 'hillshade-accent-color': '#000000' },
+  'contour-lines': { 'line-color': 'rgba(150,175,220,0.14)' },
+  borders: { 'line-color': 'rgba(150,170,200,0.3)' },
+  // hide the route while you stand in the town
+  'route-dash': { 'line-opacity': 0 }, 'route-casing': { 'line-opacity': 0 },
+  'done-line': { 'line-opacity': 0 }, 'done-casing': { 'line-opacity': 0 }, 'done-glow': { 'line-opacity': 0 },
+  'cur-line': { 'line-opacity': 0 }, 'cur-casing': { 'line-opacity': 0 }, 'cur-glow': { 'line-opacity': 0 },
+  relief: { 'color-relief-opacity': 0.3 },
+  satellite: { 'raster-brightness-max': 0.3, 'raster-saturation': -0.5 },
+};
+function applyNightPaint() {
+  const moonlight = skyState && skyState.moon.alt > 0 ? skyState.moon.fraction * Math.sin(toRad(skyState.moon.alt)) : 0;
+  const dusk = skyState ? 1 - skyMod.darkness(skyState) : 0;
+  for (const [id, props] of Object.entries(NIGHT)) for (const [k, v] of Object.entries(props)) map.setPaintProperty(id, k, v);
+  map.setPaintProperty('relief', 'color-relief-opacity', clamp(0.1 + 0.22 * moonlight + 0.6 * dusk, 0, 1));
+  map.setPaintProperty('satellite', 'raster-brightness-max', clamp(0.12 + 0.25 * moonlight + 0.6 * dusk, 0, 1));
+  // transparent sky lets the star dome behind the canvas show through
+  map.setSky({ 'sky-color': 'rgba(0,0,0,0)', 'horizon-color': 'rgba(0,0,0,0)', 'fog-color': '#0d1830',
+    'fog-ground-blend': 0.5, 'horizon-fog-blend': 0.2, 'sky-horizon-blend': 0, 'atmosphere-blend': 0 });
+}
+
+function drawDomeNow() {
+  if (!lookMode || !skyState || !skyMod) return;
+  skyMod.drawDome(dome, skyState, { bearing: map.getBearing(), pitch: map.getPitch(), fov: map.transform.fov || 36.87, lines: true });
+}
+map.on('render', drawDomeNow);
+
+// First-person camera standing at the town, terrain at true scale, so the
+// mountains sit on the horizon at the angle he would have seen them.
+let lookCam = null;
+// roll must be explicit: undefined is passed through and yields a NaN matrix
+const lookOptions = () => map.calculateCameraOptionsFromCameraLngLatAltRotation(lookCam.lngLat, lookCam.alt, lookCam.bearing, lookCam.pitch, 0);
+
+// easeTo/flyTo cap pitch at 90° and ignore camera altitude, so the descent into
+// first person is tweened by hand: camera position, altitude (log scale), heading, pitch.
+function tweenCamera(to, duration, hump = 0) {
+  const tr = map.transform;
+  const ll = tr.getCameraLngLat();
+  const from = { lngLat: [ll.lng, ll.lat], alt: Math.max(1, tr.getCameraAltitude()), bearing: map.getBearing(), pitch: map.getPitch() };
+  const b1 = shortestAngle(from.bearing, to.bearing);
+  const t0 = performance.now();
+  return new Promise((resolve) => {
+    const step = (now) => {
+      if (!lookMode) return resolve();
+      const k = smoothstep(0, 1, (now - t0) / duration);
+      const pitch = hump > 0
+        ? (k < 0.5 ? lerp(from.pitch, 70, k * 2) : lerp(70, to.pitch, (k - 0.5) * 2))   // glance down while travelling
+        : lerp(from.pitch, to.pitch, k);
+      lookCam = {
+        lngLat: [lerp(from.lngLat[0], to.lngLat[0], k), lerp(from.lngLat[1], to.lngLat[1], k)],
+        alt: Math.exp(lerp(Math.log(from.alt), Math.log(to.alt), k)) + hump * Math.sin(Math.PI * k),
+        bearing: lerp(from.bearing, b1, k),
+        pitch,
+      };
+      map.jumpTo(lookOptions());
+      if (k < 1) requestAnimationFrame(step);
+      else { lookCam = { ...to }; resolve(); }
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+async function standAt(i, bearing, duration, travel = false, pitch = LOOK_PITCH) {
+  const ground = (await elevationAt(DEM_URL, stopCoords[i])) ?? 0;
+  const to = { lngLat: stopCoords[i], alt: Math.max(0, ground) + 120, bearing, pitch };
+  const km = lookCam ? haversineKm(lookCam.lngLat, to.lngLat) : 0;
+  return tweenCamera(to, duration, travel ? Math.min(120000, km * 450) : 0);
+}
+
+async function enterLook() {
+  await loadSky();
+  setPlaying(false);
+  dayPaint = {};
+  for (const [id, props] of Object.entries(NIGHT)) {
+    dayPaint[id] = {};
+    for (const k of Object.keys(props)) dayPaint[id][k] = map.getPaintProperty(id, k);
+  }
+  lookMode = true;
+  fx.set('clear', 0);
+  container.classList.add('night');
+  ui.card.classList.add('looking');
+  $('btn-lookup').textContent = 'Back to the map';
+  dome.hidden = false;
+  map.dragPan.disable();
+  map.setMaxPitch(150);
+  map.setCenterClampedToGround(false);
+  map.setTerrain({ source: 'terrain', exaggeration: 1 });
+  map.setVerticalFieldOfView(LOOK_FOV);
+  await updateSkyCard();
+  // Descend from wherever the camera is, land at the town, and lift your gaze
+  // Face the Moon if it's up; keep the horizon just inside the bottom edge
+  const m = skyState.moon;
+  const moonUp = m.alt > 8;
+  lookCam = null;
+  const gaze = moonUp ? clamp(m.alt - LOOK_FOV / 3, 12, LOOK_FOV / 2 - 2) : 14;
+  await standAt(active, moonUp ? m.az : 180, 4200, false, 90 + gaze);
+}
+
+function exitLook() {
+  lookMode = false;
+  container.classList.remove('night');
+  ui.card.classList.remove('looking');
+  $('btn-lookup').textContent = 'Look up ↑';
+  dome.hidden = true;
+  map.dragPan.enable();
+  for (const [id, props] of Object.entries(dayPaint || {})) for (const [k, v] of Object.entries(props)) map.setPaintProperty(id, k, v);
+  applyTheme(theme);
+  map.setCenterClampedToGround(true);
+  if (ui.terrain.checked) map.setTerrain({ source: 'terrain', exaggeration: parseFloat(ui.exag.value) });
+  // Return above whichever town you were last looking up from.
+  // (Restore the FOV first: it fires moveend, which would resolve `done` early.)
+  map.setVerticalFieldOfView(MAP_FOV);
+  const done = moveEnd();
+  map.flyTo({ center: stopCoords[active], zoom: ARRIVE_ZOOM, pitch: pitchFor(ARRIVE_ZOOM), bearing: 0, duration: 2600, essential: true });
+  done.then(() => { if (!lookMode) map.setMaxPitch(78); });
+  wx = '';
+  lastElev = null;
+  updateWeather();
+  updateSkyCard();
+}
+$('btn-lookup').onclick = () => (lookMode ? exitLook() : enterLook());
+
+// While looking up, a drag turns your head instead of panning the map
+{
+  let drag = null;
+  const el = map.getCanvasContainer();
+  const start = (x, y) => { if (lookMode && lookCam) drag = { x, y, b: lookCam.bearing, p: lookCam.pitch }; };
+  const move = (x, y) => {
+    if (!drag) return;
+    lookCam.bearing = drag.b - (x - drag.x) * 0.15;
+    lookCam.pitch = clamp(drag.p + (y - drag.y) * 0.12, 60, 150);
+    map.jumpTo(lookOptions());
+  };
+  el.addEventListener('mousedown', (e) => start(e.clientX, e.clientY));
+  window.addEventListener('mousemove', (e) => move(e.clientX, e.clientY));
+  window.addEventListener('mouseup', () => (drag = null));
+  el.addEventListener('touchstart', (e) => start(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+  el.addEventListener('touchmove', (e) => move(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+  el.addEventListener('touchend', () => (drag = null));
+}
 
 function applyTheme(name) {
   theme = name;
@@ -587,6 +796,10 @@ function jumpTo(i, { fly = true } = {}) {
   setProgress(i);
   setActive(i);
   setPlaying(false);
+  if (lookMode) {            // stay under the stars, just walk to the new town
+    standAt(i, lookCam ? lookCam.bearing : map.getBearing(), 4000, true);
+    return;
+  }
   if (fly) {
     const zoom = ARRIVE_ZOOM + 0.8;
     map.flyTo({ center: stopCoords[i], zoom, pitch: pitchFor(zoom), bearing: map.getBearing(), duration: 2400, essential: true });
@@ -601,7 +814,10 @@ function overview(duration = 2200) {
 }
 
 // ---------- Wiring ----------
-ui.play.onclick = () => (playing ? setPlaying(false) : play());
+ui.play.onclick = () => {
+  if (lookMode) return exitLook();
+  playing ? setPlaying(false) : play();
+};
 ui.prev.onclick = () => jumpTo(Math.ceil(progress - 1e-6) - 1);
 ui.next.onclick = () => jumpTo(Math.floor(progress + 1e-6) + 1);
 ui.overview.onclick = () => overview();
