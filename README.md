@@ -32,7 +32,15 @@ The middle dates are **estimates** (shown with ≈). They spread the seven years
 - compass rose and scale bar
 - the 65 tirths keyed in the Indian Ocean, as on the original map
 
-You can pick 12 × 16, 18 × 24 or 24 × 32 in; all three are 3:4 and fit standard frames. Then **Print / Save PDF**: set margins to *None* and turn on *Background graphics*. Or download the SVG for a print shop.
+Formats are **12 × 16 in**, **18 × 24 in**, **24 × 36 in** and **A2**. Each one lays out separately:
+- Type is sized for viewing distance.
+- As many stop names are placed as fit without colliding.
+- The map narrows if the sheet is short.
+- Taller sheets get a *Chronicle of the Journey* timeline.
+
+The 24 × 36 in poster engraves its relief from twice-as-detailed tiles (about 270 dpi). The title face can be Didone (the default), Garamond, Copperplate or Fell.
+
+To get a file: **Print / Save PDF** (set margins to *None* and turn on *Background graphics*), or **Download SVG**. The SVG has its fonts embedded, so a print shop sees exactly what you see.
 
 ## Run
 
