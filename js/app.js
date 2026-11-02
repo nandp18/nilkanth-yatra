@@ -168,6 +168,9 @@ const map = new maplibregl.Map({
   },
 });
 if (location.hash === '#debug') window.__map = map;   // handy for console poking
+// If #map has no size yet (hidden/background tab), MapLibre falls back to a 400×300 canvas and
+// skips its first ResizeObserver callback, so it never grows. Track the container ourselves.
+new ResizeObserver(() => map.resize()).observe(map.getContainer());
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 
 // Per-theme layer visibility and paint. Route layers are added on load.
@@ -845,7 +848,9 @@ function overview(duration = 2200) {
   setPlaying(false);
   const b = new maplibregl.LngLatBounds();
   stopCoords.forEach((c) => b.extend(c));
-  map.fitBounds(b, { padding: { top: 60, bottom: 120, left: 380, right: 60 }, pitch: 28, bearing: 0, duration, essential: true });
+  // clear the card on the left, but leave the route at least ~420px on narrow windows
+  const left = Math.max(60, Math.min(380, map.getContainer().clientWidth - 480));
+  map.fitBounds(b, { padding: { top: 60, bottom: 120, left, right: 60 }, pitch: 28, bearing: 0, duration, essential: true });
 }
 
 // ---------- Wiring ----------
