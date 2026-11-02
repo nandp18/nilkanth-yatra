@@ -32,6 +32,10 @@ The middle dates are **estimates** (shown with ≈). They spread the seven years
 - compass rose and scale bar
 - the 65 tirths keyed in the Indian Ocean, as on the original map
 
+Two layouts:
+- **Classic**: title block, map, numbered key, legend and a chronicle timeline.
+- **Map**: almost no text. The map fills the sheet, extended to its proportions (more sea to the south, more Tibet to the north), and a small title cartouche sits in the Arabian Sea corner. All 65 stops are named on the map, with leader lines where they crowd, and there's no key. Open it directly with `print.html?layout=map`.
+
 Formats are **12 × 16 in**, **18 × 24 in**, **24 × 36 in** and **A2**, plus an **8.5 × 11 in test** sheet that prints inside ¼ in margins on a home printer (`print.html?size=letter`). Every format carries the same content: the stops named on the 18 × 24 in reference sheet are named on all of them. Each one lays out separately:
 - Type is sized for viewing distance.
 - As many stop names are placed as fit without colliding.

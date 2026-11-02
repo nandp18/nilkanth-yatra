@@ -6,7 +6,11 @@ import { LAND, RIVERS } from './data/printdata.js';
 import { buildChronology } from './chronology.js';
 
 const DEM_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
-const EXTENT = { lon0: 66.5, lon1: 97.5, lat0: 5.5, lat1: 35.5 };
+const EXTENT = { lon0: 66.5, lon1: 97.5, lat0: 5.5, lat1: 35.5 };      // Classic layout
+// Route bounds plus breathing room; the Map layout grows this to fill its frame
+const ROUTE_BOX = { lon0: 67.2, lon1: 98.6, lat0: 6.0, lat1: 32.8 };
+
+export const LAYOUTS = { classic: 'Classic', map: 'Map' };
 
 export const FORMATS = {
   // Home printers can't print to the edge, so the test sheet sits inside ¼ in margins on Letter
@@ -35,6 +39,32 @@ const RAD = Math.PI / 180;
 const mercY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * RAD) / 2));
 const MY1 = mercY(EXTENT.lat1), MY0 = mercY(EXTENT.lat0);
 const MAP_RATIO = (MY1 - MY0) / ((EXTENT.lon1 - EXTENT.lon0) * RAD);
+const latOfMerc = (m) => (2 * Math.atan(Math.exp(m)) - Math.PI / 2) / RAD;
+
+// Map layout: the frame fills the sheet inside the border
+function mapFrame(fmt) {
+  const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100), k = W / 1800;
+  return { x: 104 * k, y: 104 * k, w: W - 208 * k, h: H - 208 * k };
+}
+
+// Geographic extent for a layout: Classic is fixed; Map grows the route box to the
+// frame's proportions, giving most of the extra height to the open sea in the south
+export function extentFor(fmt, layout) {
+  if (layout !== 'map') return EXTENT;
+  const F = mapFrame(fmt), aspect = F.h / F.w;
+  let { lon0, lon1, lat0, lat1 } = ROUTE_BOX;
+  let m0 = mercY(lat0), m1 = mercY(lat1);
+  const need = aspect * (lon1 - lon0) * RAD;
+  if (need > m1 - m0) {
+    const extra = need - (m1 - m0);
+    m0 -= extra * 0.62; m1 += extra * 0.38;
+  } else {
+    const L = (m1 - m0) / aspect / RAD, c = (lon0 + lon1) / 2;
+    lon0 = c - L / 2; lon1 = c + L / 2;
+  }
+  const r = (v) => Math.round(v * 1000) / 1000;
+  return { lon0: r(lon0), lon1: r(lon1), lat0: r(latOfMerc(m0)), lat1: r(latOfMerc(m1)) };
+}
 const f1 = (n) => +n.toFixed(1);
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -71,11 +101,17 @@ const CHRONO = buildChronology(LEG_KM);
 
 // ---------- Engraved relief from Terrarium tiles (cached per zoom) ----------
 const reliefCache = {};
-export function relief(Z, onProgress) {
-  return (reliefCache[Z] ||= engrave(Z, onProgress));
+export function relief(Z, ext, onProgress) {
+  const key = `${Z}:${ext.lon0},${ext.lon1},${ext.lat0},${ext.lat1}`;
+  return (reliefCache[key] ||= engrave(Z, ext, onProgress));
+}
+// Tiles needed at a zoom for an extent (used to cap memory for big sheets)
+export function tileCount(Z, ext) {
+  const n = 2 ** Z, tx = (lon) => Math.floor(((lon + 180) / 360) * n), ty = (lat) => Math.floor(((1 - mercY(lat) / Math.PI) / 2) * n);
+  return (tx(ext.lon1) - tx(ext.lon0) + 1) * (ty(ext.lat0) - ty(ext.lat1) + 1);
 }
 
-async function engrave(Z, onProgress) {
+async function engrave(Z, EXTENT, onProgress) {
   const n = 2 ** Z;
   const tx = (lon) => ((lon + 180) / 360) * n;
   const ty = (lat) => ((1 - mercY(lat) / Math.PI) / 2) * n;
@@ -172,7 +208,8 @@ const boxHit = (a, b) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1
 export const REFERENCE = '18x24';
 export let lastNamed = null;
 
-export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
+export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 'classic', EXT = EXTENT) {
+  const MAPL = layout === 'map';
   const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100);
   const k = W / 1800;                        // geometric scale vs. the 18 in design
   const ts = k;                              // everything scales with the sheet: same content at every size
@@ -194,12 +231,14 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
   const top = 70 * k;
   const yEyebrow = top + fs(62), yTitle = yEyebrow + fs(150 * Math.min(1.08, face.scale)), ySub = yTitle + fs(56);
   const yRule = ySub + fs(26), yFacts = yRule + fs(44);
-  const F = { x: (W - mapW) / 2, w: mapW };
+  let F = { x: (W - mapW) / 2, w: mapW };
   F.y = yFacts + fs(50);
   F.h = F.w * MAP_RATIO;
-  const px = (lon) => F.x + ((lon - EXTENT.lon0) / (EXTENT.lon1 - EXTENT.lon0)) * F.w;
-  const py = (lat) => F.y + ((MY1 - mercY(lat)) / (MY1 - MY0)) * F.h;
-  const unitsPerKm = (lat) => F.w / (EXTENT.lon1 - EXTENT.lon0) / (111.32 * Math.cos(lat * RAD));
+  if (MAPL) F = mapFrame(fmt);
+  const ey1 = mercY(EXT.lat1), ey0 = mercY(EXT.lat0);
+  const px = (lon) => F.x + ((lon - EXT.lon0) / (EXT.lon1 - EXT.lon0)) * F.w;
+  const py = (lat) => F.y + ((ey1 - mercY(lat)) / (ey1 - ey0)) * F.h;
+  const unitsPerKm = (lat) => F.w / (EXT.lon1 - EXT.lon0) / (111.32 * Math.cos(lat * RAD));
   const pathOf = (flat, close) => {
     let d = '';
     for (let i = 0; i < flat.length; i += 2) d += `${i ? 'L' : 'M'}${f1(px(flat[i]))},${f1(py(flat[i + 1]))}`;
@@ -230,11 +269,20 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
   const obstacles = [[F.x - 1e4, F.y - 1e4, F.x + F.w + 1e4, F.y + 4], [F.x - 1e4, bottom - 4, F.x + F.w + 1e4, bottom + 1e4],
     [F.x - 1e4, F.y, F.x + 4, bottom], [F.x + F.w - 4, F.y, F.x + F.w + 1e4, bottom]];
   const kx = px(84.3), ky = py(17.6), kw = px(97.1) - kx, kh = py(5.75) - ky;
-  obstacles.push([kx - 6, ky - 6, kx + kw + 6, ky + kh + 6]);
-  const roseR = 92 * ts, rcx = px(69.6), rcy = py(13.4);
+  const k500 = 500 * unitsPerKm(20);
+  // Map layout: title cartouche in the open sea at lower left, compass rose above it
+  const cart = { w: Math.max(fs(560), textWidth('Van Vicharan', `${face.weight} $px ${face.family}`, fs(100 * face.scale)) + fs(90)), h: fs(372) };
+  cart.x = F.x + fs(40); cart.y = F.y + F.h - fs(40) - cart.h;
+  const roseR = 92 * ts;
+  // Map layout: rose out in the open Indian Ocean, clear of the crowded southern tip
+  const rcx = MAPL ? px(89.4) : px(69.6), rcy = MAPL ? Math.min(py(2.4), F.y + F.h - roseR * 1.6) : py(13.4);
+  const sx = MAPL ? cart.x + (cart.w - k500) / 2 : px(67.6), sy = MAPL ? cart.y + cart.h - fs(86) : py(9.1);
+  if (MAPL) obstacles.push([cart.x - 8, cart.y - 8, cart.x + cart.w + 8, cart.y + cart.h + 8]);
+  else {
+    obstacles.push([kx - 6, ky - 6, kx + kw + 6, ky + kh + 6]);
+    obstacles.push([sx - 10, sy - fs(26), sx + k500 + 10, sy + fs(36)]);
+  }
   obstacles.push([rcx - roseR, rcy - roseR * 1.3, rcx + roseR, rcy + roseR]);
-  const k500 = 500 * unitsPerKm(20), sx = px(67.6), sy = py(9.1);
-  obstacles.push([sx - 10, sy - fs(26), sx + k500 + 10, sy + fs(36)]);
 
   // area labels: [text, lon, lat, class, size, font, tracking, rotate]
   const AREA = [
@@ -245,7 +293,9 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
     ['Deccan', 78.6, 18.5, 'region', 28, FELL_SC, 13], ['Gujarat', 71.2, 23.6, 'region', 20, FELL_SC, 8],
     ['Hindustan', 79.6, 24.3, 'region big', 50, FELL_SC, 32], ['Thar', 71.6, 27.4, 'region', 20, FELL_SC, 8],
     ['Lanka', 80.7, 7.3, 'region', 20, FELL_SC, 8],
-  ];
+    ...(MAPL ? [['Burma', 95.4, 22.4, 'region', 20, FELL_SC, 8], ['Laccadive Islands', 71.6, 9.6, 'region', 15, FELL_SC, 4]] : []),
+  ].map((a) => (MAPL && a[0] === 'Indian Ocean' ? ['Indian Ocean', 84.2, Math.max(EXT.lat0 + 6.6, 4.6), 'sea', 40, FELL_I, 10] : a))
+   .filter(([, lon, lat]) => lon > EXT.lon0 && lon < EXT.lon1 && lat > EXT.lat0 && lat < EXT.lat1);
   let areas = '';
   for (const [text, lon, lat, cls, size, font, track, rot] of AREA) {
     const s = fs(size), tr = track * ts, wdt = textWidth(text, font, s, tr), x = px(lon), y = py(lat);
@@ -277,7 +327,7 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
     const major = !!s.key;
     const text = s.key || s.name.split(' – ')[0].split(' & ')[0].replace(/ (Mandir|Kovil|Swami)$/, '');
     // Reference names must appear on every sheet: if no side fits, retry a little smaller
-    const sizes = onlyNames ? [1, 0.88, 0.78] : [1];
+    const sizes = onlyNames || MAPL ? [1, 0.88, 0.78] : [1];
     for (const shrink of sizes) {
       if (named.has(i)) break;
       const size = f1(fs(major ? 21 : 15.5) * shrink);
@@ -299,6 +349,38 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
         named.add(i);
         names += `<text class="${major ? 'place' : 'place minor'}" x="${f1(b[5])}" y="${f1(b[6])}" text-anchor="${b[4]}" style="font-size:${size}px">${esc(text)}</text>`;
         break;
+      }
+    }
+    // Map layout names every stop: if nothing fits beside the disc, set the label
+    // further out in clear space and draw a fine leader line back to it
+    if (MAPL && !named.has(i)) {
+      const size = f1(fs(major ? 19 : 14));
+      const wdt = textWidth(text, FELL_I, size), hgt = size * 0.92;
+      const clearPath = (x0, y0, x1, y1) => {
+        for (let t = 0.15; t <= 1; t += 0.12) {
+          const qx = x0 + (x1 - x0) * t, qy = y0 + (y1 - y0) * t;
+          if (discBoxes.some((o) => o[4] !== i && qx > o[0] && qx < o[2] && qy > o[1] && qy < o[3])) return false;
+          if (placed.some((o) => qx > o[0] && qx < o[2] && qy > o[1] && qy < o[3])) return false;
+        }
+        return true;
+      };
+      search: for (const r of [2.4, 3.3, 4.4, 5.8, 7.5, 9.5, 12, 15].map((m) => R * m)) {
+        for (let a = 0; a < 24; a++) {
+          const ang = (a / 24) * Math.PI * 2, cx = Math.cos(ang), cy = Math.sin(ang);
+          const lx = d.x + cx * r, ly = d.y + cy * r;
+          const anchor = cx >= 0 ? 'start' : 'end';
+          const bx0 = anchor === 'start' ? lx + fs(3) : lx - fs(3) - wdt;
+          const box = [bx0, ly - hgt * 0.62, bx0 + wdt, ly + hgt * 0.38];
+          if (obstacles.some((o) => boxHit(box, o)) || placed.some((o) => boxHit(box, o)) ||
+              discBoxes.some((o) => o[4] !== i && boxHit(box, o))) continue;
+          const ex = d.x + cx * R, ey = d.y + cy * R;
+          if (!clearPath(ex, ey, lx, ly)) continue;
+          placed.push(box);
+          named.add(i);
+          names += `<line x1="${f1(ex)}" y1="${f1(ey)}" x2="${f1(lx)}" y2="${f1(ly)}" stroke="${C.ink2}" stroke-width="${f1(0.7 * ts)}" stroke-opacity="0.8"/>`;
+          names += `<text class="${major ? 'place' : 'place minor'}" x="${f1(anchor === 'start' ? lx + fs(3) : lx - fs(3))}" y="${f1(ly + hgt * 0.3)}" text-anchor="${anchor}" style="font-size:${size}px">${esc(text)}</text>`;
+          break search;
+        }
       }
     }
   }
@@ -339,8 +421,8 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
 
   // --- graticule + water-lining ---
   let grat = '';
-  for (let lon = 70; lon <= 95; lon += 5) grat += `M${f1(px(lon))},${f1(F.y)}V${f1(bottom)}`;
-  for (let lat = 10; lat <= 35; lat += 5) grat += `M${f1(F.x)},${f1(py(lat))}H${f1(F.x + F.w)}`;
+  for (let lon = Math.ceil(EXT.lon0 / 5) * 5; lon < EXT.lon1; lon += 5) grat += `M${f1(px(lon))},${f1(F.y)}V${f1(bottom)}`;
+  for (let lat = Math.ceil(EXT.lat0 / 5) * 5; lat < EXT.lat1; lat += 5) grat += `M${f1(F.x)},${f1(py(lat))}H${f1(F.x + F.w)}`;
   let waterLines = '';
   for (let i = 8; i >= 1; i--) {
     const wd = i * 7 * k;
@@ -349,6 +431,19 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
   }
 
   const midX = W / 2;
+  let cartouche = '';
+  if (MAPL) {
+    const cx = cart.x + cart.w / 2;
+    const yT = cart.y + fs(54), yTitle = yT + fs(92 * Math.min(1.08, face.scale)), ySub = yTitle + fs(44), yFacts = ySub + fs(40);
+    cartouche = `<rect x="${f1(cart.x)}" y="${f1(cart.y)}" width="${f1(cart.w)}" height="${f1(cart.h)}" fill="${C.key}" fill-opacity="0.96" stroke="${C.ink}" stroke-width="${f1(1.6 * ts)}"/>
+      <rect x="${f1(cart.x + 7 * ts)}" y="${f1(cart.y + 7 * ts)}" width="${f1(cart.w - 14 * ts)}" height="${f1(cart.h - 14 * ts)}" fill="none" stroke="${C.ink}" stroke-width="${f1(0.6 * ts)}"/>
+      <text class="eyebrow" x="${f1(cx)}" y="${f1(yT)}" style="font-size:${fs(19)}px;letter-spacing:${fs(8)}px">A Chart of the Pilgrimage called</text>
+      <text class="title" x="${f1(cx)}" y="${f1(yTitle)}" style="font-size:${fs(100 * face.scale)}px;letter-spacing:${f1(face.track * ts)}px">Van Vicharan</text>
+      <text class="subtitle" x="${f1(cx)}" y="${f1(ySub)}" style="font-size:${fs(25)}px">The forest journey of Nilkanth Varni</text>
+      ${ornamentRule(cx, ySub + fs(18), fs(150), ts)}
+      <text class="facts" x="${f1(cx)}" y="${f1(yFacts)}" style="font-size:${fs(17)}px;letter-spacing:${fs(4)}px">Ayodhya to Loj · 1792 – 1799</text>
+      <text class="credit" x="${f1(cx)}" y="${f1(cart.y + cart.h - fs(22))}" text-anchor="middle" style="font-size:${fs(11)}px">Relief: Mapzen Terrain Tiles · Coastlines: Natural Earth · Tirth positions approximate</text>`;
+  }
   const rel = rel_(reliefData, px, py);
   const titleSize = fs(150 * face.scale);
 
@@ -405,11 +500,11 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
 
   ${border(W, H, k)}
 
-  <text class="eyebrow" x="${midX}" y="${f1(yEyebrow)}" style="font-size:${fs(30)}px;letter-spacing:${fs(14)}px">A Chart of the Pilgrimage called</text>
+  ${MAPL ? '' : `<text class="eyebrow" x="${midX}" y="${f1(yEyebrow)}" style="font-size:${fs(30)}px;letter-spacing:${fs(14)}px">A Chart of the Pilgrimage called</text>
   <text class="title" x="${midX}" y="${f1(yTitle)}" style="font-size:${titleSize}px;letter-spacing:${f1(face.track * ts)}px">Van Vicharan</text>
   <text class="subtitle" x="${midX}" y="${f1(ySub)}" style="font-size:${fs(38)}px">The forest journey of Nilkanth Varni, from Ayodhya to Loj</text>
   ${ornamentRule(midX, yRule, fs(330), ts)}
-  <text class="facts" x="${midX}" y="${f1(yFacts)}" style="font-size:${fs(25)}px;letter-spacing:${fs(5)}px">1792 · sixty-five tirths · seven years, one month &amp; eleven days · 1799</text>
+  <text class="facts" x="${midX}" y="${f1(yFacts)}" style="font-size:${fs(25)}px;letter-spacing:${fs(5)}px">1792 · sixty-five tirths · seven years, one month &amp; eleven days · 1799</text>`}
 
   <g clip-path="url(#frame)">
     <rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}" fill="${C.sea}"/>
@@ -427,12 +522,13 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
     ${names}
     ${annots}
     ${compassRose(rcx, rcy, roseR, ts)}
+    ${cartouche}
     ${scale}
-    ${key}
+    ${MAPL ? '' : key}
   </g>
-  ${neatline(F, px, py, k, fs)}
+  ${neatline(F, px, py, k, fs, EXT)}
 
-  <g transform="translate(${f1(F.x)}, ${f1(yLegend)})">
+  ${MAPL ? '' : `<g transform="translate(${f1(F.x)}, ${f1(yLegend)})">
     <line x1="0" y1="0" x2="${fs(56)}" y2="0" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}"/>
     <text class="legend" x="${fs(68)}" y="${fs(6)}" style="font-size:${fs(19)}px">The route as charted</text>
     <circle cx="${fs(340)}" cy="0" r="${f1(R)}" fill="${C.key}" stroke="${C.ink}" stroke-width="${f1(1.4 * ts)}"/><text class="num" x="${fs(340)}" y="${f1(R * 0.36)}" style="font-size:${fs(12.5)}px">7</text>
@@ -443,7 +539,7 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null) {
   <text class="colophon" x="${midX}" y="${f1(yColophon)}" style="font-size:${fs(21)}px">Departed Ayodhya on Ashadh sud 10, Samvat 1849 · Arrived at Loj on Shravan vad 6, Samvat 1856</text>
   ${chronicle(F.x, yColophon + fs(36), F.w, chronH - fs(20), fs, ts)}
   <text class="credit" x="${f1(F.x)}" y="${f1(yCredit)}" style="font-size:${fs(13.5)}px">Relief engraved from Mapzen Terrain Tiles · Coastlines &amp; rivers: Natural Earth · Positions of tirths are approximate</text>
-  <text class="credit" x="${f1(F.x + F.w)}" y="${f1(yCredit)}" text-anchor="end" style="font-size:${fs(13.5)}px">${esc(fmt.label)} · Mercator projection · Drawn ${new Date().getFullYear()}</text>
+  <text class="credit" x="${f1(F.x + F.w)}" y="${f1(yCredit)}" text-anchor="end" style="font-size:${fs(13.5)}px">${esc(fmt.label)} · Mercator projection · Drawn ${new Date().getFullYear()}</text>`}
 
   <rect width="${W}" height="${H}" fill="url(#vignette)" pointer-events="none"/>
   <rect width="${W}" height="${H}" filter="url(#grain)" opacity="0.45" pointer-events="none"/>
@@ -496,7 +592,7 @@ function compassRose(cx, cy, R, ts) {
   return g;
 }
 
-function neatline(F, px, py, k, fs) {
+function neatline(F, px, py, k, fs, EXTENT) {
   const t = 9 * k, { x, y, w, h } = F;
   let g = `<rect x="${f1(x - t)}" y="${f1(y - t)}" width="${f1(w + 2 * t)}" height="${f1(h + 2 * t)}" fill="none" stroke="${C.ink}" stroke-width="${f1(1.5 * k)}"/>`;
   g += `<rect x="${f1(x)}" y="${f1(y)}" width="${f1(w)}" height="${f1(h)}" fill="none" stroke="${C.ink}" stroke-width="${f1(1 * k)}"/>`;
@@ -509,12 +605,13 @@ function neatline(F, px, py, k, fs) {
     g += `<rect x="${f1(x - t)}" y="${f1(a)}" width="${f1(t)}" height="${f1(b - a)}" fill="${C.ink}"/><rect x="${f1(x + w)}" y="${f1(a)}" width="${f1(t)}" height="${f1(b - a)}" fill="${C.ink}"/>`;
   }
   const s = fs(15);
-  for (let lon = 70; lon <= 95; lon += 5) {
+  for (let lon = Math.ceil(EXTENT.lon0 / 5) * 5; lon < EXTENT.lon1; lon += 5) {
     g += `<text class="deg" x="${f1(px(lon))}" y="${f1(y - t - s * 0.55)}" style="font-size:${s}px">${lon}° E</text><text class="deg" x="${f1(px(lon))}" y="${f1(y + h + t + s * 1.3)}" style="font-size:${s}px">${lon}° E</text>`;
   }
-  for (let lat = 10; lat <= 35; lat += 5) {
-    g += `<text class="deg" transform="translate(${f1(x - t - s * 0.6)},${f1(py(lat))}) rotate(-90)" style="font-size:${s}px">${lat}° N</text>`;
-    g += `<text class="deg" transform="translate(${f1(x + w + t + s * 1.2)},${f1(py(lat))}) rotate(-90)" style="font-size:${s}px">${lat}° N</text>`;
+  for (let lat = Math.ceil(EXTENT.lat0 / 5) * 5; lat < EXTENT.lat1; lat += 5) {
+    const lab = lat === 0 ? 'Equator' : `${Math.abs(lat)}° ${lat < 0 ? 'S' : 'N'}`;
+    g += `<text class="deg" transform="translate(${f1(x - t - s * 0.6)},${f1(py(lat))}) rotate(-90)" style="font-size:${s}px">${lab}</text>`;
+    g += `<text class="deg" transform="translate(${f1(x + w + t + s * 1.2)},${f1(py(lat))}) rotate(-90)" style="font-size:${s}px">${lab}</text>`;
   }
   return g;
 }

@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 
 const BASE = 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/';
 const get = async (f) => (await fetch(BASE + f + '.geojson')).json();
-const BBOX = [65.5, 4.5, 98.5, 36.5];           // map extent plus a margin
+const BBOX = [56, -10, 108, 46];                // generous: the full-bleed layout extends the map to fit the sheet
 const TOL = 0.012;                               // simplification tolerance, degrees
 const RIVERS = new Set(['Ganges', 'Yamuna', 'Brahmaputra', 'Dihang', 'Yarlung', 'Indus', 'Sutlej', 'Chenab',
   'Narmada', 'Godävari', 'Krishna', 'Mahäna Nadï', 'Irrawaddy Delta', 'Ayeyarwady']);
