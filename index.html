@@ -56,6 +56,7 @@
         <label class="chip"><input type="checkbox" id="tg-terrain" checked /><span>3D</span></label>
         <label class="chip"><input type="checkbox" id="tg-contours" checked /><span>Contours</span></label>
         <label class="chip"><input type="checkbox" id="tg-follow" checked /><span>Follow</span></label>
+        <label class="chip"><input type="checkbox" id="tg-weather" checked /><span>Weather</span></label>
       </div>
       <div class="row">
         <label class="field">Relief
@@ -80,6 +81,7 @@
   </aside>
 
   <main id="map"></main>
+  <div id="fx-layer" aria-hidden="true"><div id="fx-tint"></div><canvas id="fx"></canvas></div>
 
   <article id="card" class="hidden" aria-live="polite">
     <div class="card-in">
@@ -90,6 +92,9 @@
       <h2 id="card-name"></h2>
       <div class="alt" id="card-alt"></div>
       <p class="note" id="card-note"></p>
+      <div class="wx" id="card-wx" data-wx="clear">
+        <span class="wx-ico" id="wx-ico"></span><span id="wx-label">Clear skies</span><span class="wx-elev" id="wx-elev"></span>
+      </div>
       <div class="meta">
         <div><b id="card-leg">—</b><small>from previous</small></div>
         <div><b id="card-total">0 km</b><small>into the journey</small></div>

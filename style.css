@@ -278,12 +278,36 @@ input[type=range].thin::-moz-range-thumb { width: 10px; height: 10px; border-rad
 #card .meta b { display: block; font-size: 15px; font-weight: 600; }
 #card .meta small { font-size: 10.5px; color: var(--muted); }
 
+#card .wx {
+  display: flex; align-items: center; gap: 7px; margin-top: 12px;
+  font-size: 12px; color: var(--ink-2);
+}
+#card .wx-ico svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+#card .wx-elev { margin-left: auto; color: var(--muted); }
+#card .wx-ico { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--wash); transition: background .6s, color .6s; }
+#card .wx[data-wx=snow] .wx-ico, #card .wx[data-wx=flurries] .wx-ico { background: #e7eff6; color: #3d6a8e; }
+#card .wx[data-wx=rain] .wx-ico { background: #e3ebef; color: #3f5f72; }
+#card .wx[data-wx=mist] .wx-ico { background: #eef0ee; color: #66706c; }
+#card .wx[data-wx=heat] .wx-ico { background: #fbeedd; color: #b4651a; }
+
+/* ============================================================
+   Weather overlay
+   ============================================================ */
+#fx-layer { position: absolute; top: 0; bottom: 0; left: var(--panel-w); right: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+#fx { position: absolute; inset: 0; width: 100%; height: 100%; }
+#fx-tint { position: absolute; inset: 0; opacity: 0; will-change: opacity; }
+#fx-tint[data-wx=snow] { background: radial-gradient(ellipse at 50% 45%, rgba(235,242,248,0) 35%, rgba(228,237,245,.6) 100%), linear-gradient(rgba(220,232,242,.22), rgba(220,232,242,.22)); }
+#fx-tint[data-wx=rain] { background: radial-gradient(ellipse at 50% 50%, rgba(44,60,76,.22) 30%, rgba(44,60,76,.48) 100%); }
+#fx-tint[data-wx=mist] { background: radial-gradient(ellipse at 50% 55%, rgba(246,246,242,0) 30%, rgba(246,246,242,.7) 100%); }
+#fx-tint[data-wx=heat] { background: radial-gradient(ellipse at 50% 40%, rgba(255,214,150,0) 40%, rgba(255,190,110,.28) 100%); }
+
 /* ============================================================
    Timeline
    ============================================================ */
 #timeline {
   position: absolute; left: calc(var(--panel-w) + 24px); right: 24px; bottom: 22px; z-index: 3;
-  background: rgba(255,255,255,.95); backdrop-filter: blur(10px);
+  /* no backdrop-filter: blurring a live WebGL canvas costs a full-screen pass every frame */
+  background: #fff;
   border-radius: var(--radius); box-shadow: var(--shadow);
   padding: 14px 18px 10px;
 }
@@ -320,6 +344,7 @@ input[type=range].thin::-moz-range-thumb { width: 10px; height: 10px; border-rad
   .lede, .stats { display: none; }
   #card { left: 12px; right: 12px; top: 12px; width: auto; }
   #timeline { left: 12px; right: 12px; bottom: calc(46% + 12px); }
+  #fx-layer { left: 0; bottom: 46%; }
   .regions { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {

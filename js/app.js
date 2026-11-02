@@ -1,4 +1,5 @@
 import { STOPS, CITIES, AREAS, REGIONS, REGION_SHORT } from './stops.js';
+import { WeatherFX, WEATHER_LABEL, WEATHER_SKY, elevationAt } from './weather.js';
 
 const DEM_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
@@ -11,7 +12,7 @@ const toRad = (d) => (d * Math.PI) / 180;
 const toDeg = (r) => (r * 180) / Math.PI;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
-const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const easeSine = (t) => (1 - Math.cos(Math.PI * t)) / 2;
 
 function haversineKm([lon1, lat1], [lon2, lat2]) {
   const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
@@ -75,6 +76,16 @@ function legDistFrac(i, t) {
   const f = clamp(t, 0, 1) * SEG;
   const k = Math.min(Math.floor(f), SEG - 1);
   return lerp(legFrac[i][k], legFrac[i][k + 1], f - k);
+}
+// Inverse of legDistFrac: distance fraction along leg i -> parametric t
+function legTAt(i, f) {
+  const a = legFrac[i];
+  let lo = 0, hi = SEG;
+  while (hi - lo > 1) {
+    const m = (lo + hi) >> 1;
+    if (a[m] <= f) lo = m; else hi = m;
+  }
+  return (lo + clamp((f - a[lo]) / (a[hi] - a[lo] || 1), 0, 1)) / SEG;
 }
 const legColor = (i) => `hsl(${lerp(44, 24, i / (LAST - 1)).toFixed(1)}, 84%, ${lerp(57, 50, i / (LAST - 1)).toFixed(1)}%)`;
 const fmtKm = (km) => `${Math.round(km).toLocaleString()} km`;
@@ -154,6 +165,7 @@ const map = new maplibregl.Map({
     ],
   },
 });
+if (location.hash === '#debug') window.__map = map;   // handy for console poking
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 
 // Per-theme layer visibility and paint. Route layers are added on load.
@@ -200,7 +212,7 @@ const THEMES = {
 const $ = (id) => document.getElementById(id);
 const ui = {
   play: $('btn-play'), playLabel: $('play-label'), prev: $('btn-prev'), next: $('btn-next'),
-  overview: $('btn-overview'), terrain: $('tg-terrain'), contours: $('tg-contours'), follow: $('tg-follow'),
+  overview: $('btn-overview'), weather: $('tg-weather'), terrain: $('tg-terrain'), contours: $('tg-contours'), follow: $('tg-follow'),
   exag: $('rg-exag'), exagOut: $('out-exag'), list: $('stop-list'), scrub: $('scrub'), card: $('card'),
   tlRegions: $('tl-regions'), roStop: $('ro-stop'), roKm: $('ro-km'),
 };
@@ -288,6 +300,10 @@ let curLeg = -1;           // leg currently held in the 'cur' source
 let doneLegs = 0;          // legs [0, doneLegs) are flagged done via feature-state
 let playing = false;
 let raf = null;
+let lastUi = 0;            // throttle for panel text during playback
+let lastWx = 0;            // throttle for weather sampling
+let lastCut = -1;          // last gradient cut-off drawn
+let wx = 'clear';          // current weather condition
 
 function setProgress(p) {
   progress = clamp(p, 0, LAST);
@@ -295,7 +311,15 @@ function setProgress(p) {
   traveler.setLngLat(pointAt(progress));
   ui.scrub.value = progress;
   ui.scrub.style.setProperty('--p', `${(progress / LAST) * 100}%`);
-  ui.roKm.textContent = `${fmtKm(kmAt(progress))} walked`;
+  const now = performance.now();
+  if (!playing || now - lastUi > 120) {
+    lastUi = now;
+    ui.roKm.textContent = `${fmtKm(kmAt(progress))} walked`;
+  }
+  if (!playing || now - lastWx > 250) {
+    lastWx = now;
+    updateWeather();
+  }
 
   const reached = Math.floor(progress + 1e-6);
   if (reached !== reachedIdx) {
@@ -343,11 +367,61 @@ function drawWalked() {
     curLeg = leg;
     map.getSource('cur').setData(line(legs[leg]));
   }
+  // Gradient changes re-rasterise a ramp, so skip sub-pixel changes and hidden layers.
   const f = legDistFrac(leg, t);
+  if (Math.abs(f - lastCut) < 0.002 && f !== 0 && f !== 1) return;
+  lastCut = f;
   const cut = (c) => (f <= 0 ? 'rgba(0,0,0,0)' : ['step', ['line-progress'], c, f, 'rgba(0,0,0,0)']);
   map.setPaintProperty('cur-line', 'line-gradient', cut(legColor(leg)));
-  map.setPaintProperty('cur-casing', 'line-gradient', cut('#ffffff'));
-  map.setPaintProperty('cur-glow', 'line-gradient', cut('#ffb15c'));
+  map.setPaintProperty(theme === 'atlas' ? 'cur-casing' : 'cur-glow', 'line-gradient', cut(theme === 'atlas' ? '#ffffff' : '#ffb15c'));
+}
+
+// ---------- Weather ----------
+const fx = new WeatherFX($('fx'), $('fx-tint'));
+const RAINY = new Set([19, 20, 21, 22, 23, 24, 25, 44, 45, 46, 47]);   // monsoon belts: Bengal, Northeast, Kerala
+const HOT = new Set(['gujarat', 'deccan', 'maharashtra']);
+const WX_ICON = {
+  snow: '<path d="M8 1.5v13M2.4 4.8l11.2 6.4M2.4 11.2l11.2-6.4"/>',
+  rain: '<path d="M4 12.5l-1 2M8 12.5l-1 2M12 12.5l-1 2"/><path d="M4.5 10.5a3 3 0 0 1 .3-6 4 4 0 0 1 7.4 1.2 2.4 2.4 0 0 1-.7 4.8z"/>',
+  mist: '<path d="M2 5.5h12M3.5 8.5h9M2 11.5h12"/>',
+  heat: '<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/>',
+  clear: '<circle cx="8" cy="8" r="3"/><path d="M8 2v1.2M8 12.8V14M2 8h1.2M12.8 8H14"/>',
+};
+WX_ICON.flurries = WX_ICON.snow;
+
+function classify(elev, stop) {
+  if (elev >= 3000) return ['snow', clamp(0.55 + (elev - 3000) / 3000, 0.55, 1)];
+  if (elev >= 2300) return ['flurries', 0.3];
+  if (RAINY.has(stop.n)) return ['rain', 0.85];
+  if (elev >= 900) return ['mist', 0.75];
+  if (HOT.has(stop.region)) return ['heat', 0.6];
+  return ['clear', 0];
+}
+
+let wxSeq = 0;
+let lastElev = null;
+async function updateWeather() {
+  const seq = ++wxSeq;
+  const elev = await elevationAt(DEM_URL, pointAt(progress));
+  if (seq !== wxSeq) return;                       // a newer sample superseded this one
+  if (elev != null) lastElev = Math.max(0, elev);
+  if (lastElev == null) return;
+  const [kind, level] = classify(lastElev, STOPS[Math.round(progress)]);
+  fx.set(kind, level);
+  $('wx-elev').textContent = `${Math.round(lastElev).toLocaleString()} m`;
+  if (kind !== wx) {
+    wx = kind;
+    $('wx-label').textContent = WEATHER_LABEL[kind];
+    $('wx-ico').innerHTML = `<svg viewBox="0 0 16 16">${WX_ICON[kind]}</svg>`;
+    $('card-wx').dataset.wx = kind;
+    applySky();
+  }
+}
+
+function applySky() {
+  if (!map.getLayer('route-dash')) return;
+  const base = ui.weather.checked ? WEATHER_SKY[wx === 'flurries' ? 'snow' : wx] : {};
+  map.setSky({ ...THEMES[theme].sky, ...base });
 }
 
 const line = (coords) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } });
@@ -357,13 +431,16 @@ function applyTheme(name) {
   const t = THEMES[name];
   container.classList.toggle('theme-atlas', name === 'atlas');
   container.classList.toggle('theme-satellite', name === 'satellite');
+  fx.setLightBasemap(name === 'atlas');
   if (!map.getLayer('route-dash')) return; // route layers not added yet; reapplied on load
   t.visible.forEach((id) => map.setLayoutProperty(id, 'visibility', 'visible'));
   t.hidden.forEach((id) => map.setLayoutProperty(id, 'visibility', 'none'));
   Object.entries(t.paint).forEach(([id, props]) => {
     Object.entries(props).forEach(([k, v]) => map.setPaintProperty(id, k, v));
   });
-  map.setSky(t.sky);
+  lastCut = -1;
+  drawWalked();
+  applySky();
 }
 
 // ---------- Playback ----------
@@ -387,17 +464,42 @@ function shortestAngle(from, to) {
   return from + ((((to - from) % 360) + 540) % 360) - 180;
 }
 
-// Walk from current progress to the next whole stop, with the camera riding along.
+// Van Wijk & Nuij "optimal" zoom-and-pan path, the same curve map.flyTo uses.
+// Returns zoom and distance fraction as functions of path parameter s in [0, S].
+const RHO = 1.42;
+function flight(fromLL, toLL, z0, z1) {
+  const a = maplibregl.MercatorCoordinate.fromLngLat(fromLL);
+  const b = maplibregl.MercatorCoordinate.fromLngLat(toLL);
+  const u1 = Math.hypot(b.x - a.x, b.y - a.y) * 512 * 2 ** z0;      // pixels at start zoom
+  const { width, height } = container.getBoundingClientRect();
+  const w0 = Math.max(width, height), w1 = w0 / 2 ** (z1 - z0), rho2 = RHO * RHO;
+  const r = (k) => {
+    const q = (w1 * w1 - w0 * w0 + (k ? -1 : 1) * rho2 * rho2 * u1 * u1) / (2 * (k ? w1 : w0) * rho2 * u1);
+    return Math.log(Math.sqrt(q * q + 1) - q);
+  };
+  const r0 = r(0);
+  let S = (r(1) - r0) / RHO;
+  let w = (x) => Math.cosh(r0) / Math.cosh(r0 + RHO * x);
+  let u = (x) => (w0 * ((Math.cosh(r0) * Math.tanh(r0 + RHO * x) - Math.sinh(r0)) / rho2)) / u1;
+  if (u1 < 1e-6 || !isFinite(S)) {
+    const dir = w1 < w0 ? -1 : 1;
+    S = Math.abs(Math.log(w1 / w0)) / RHO || 0.0001;
+    u = (x) => x / S;
+    w = (x) => Math.exp(dir * RHO * x);
+  }
+  return { S, zoomAt: (x) => z0 + Math.log2(1 / w(x)), fracAt: (x) => clamp(u(x), 0, 1) };
+}
+
+// Walk from current progress to the next whole stop. The traveler's ground position
+// follows the same curve as the camera, so it stays centred and screen speed stays even.
 function walkLeg() {
   return new Promise((resolve) => {
     const i = Math.floor(progress + 1e-6);
     if (i >= LAST) return resolve();
-    const start = progress, end = i + 1;
-    const km = legKm[i] * (end - start);
-    const dur = clamp(1600 + km * 5, 1800, 7000) / speedVal;
-    const z0 = map.getZoom();
-    // Pull back mid-leg just enough to see the whole leg, then settle in on arrival.
-    const hump = Math.max(0, (z0 + ARRIVE_ZOOM) / 2 - Math.min(legZoom(km), ARRIVE_ZOOM));
+    const f0 = legDistFrac(i, progress - i);
+    const follow = ui.follow.checked;
+    const fl = follow ? flight(pointAt(progress), stopCoords[i + 1], map.getZoom(), ARRIVE_ZOOM) : null;
+    const dur = (fl ? clamp(700 + 1150 * fl.S, 1800, 8000) : clamp(1500 + legKm[i] * 3, 1800, 6000)) / speedVal;
     const b0 = map.getBearing();
     const b1 = shortestAngle(b0, swayBearing(bearing(stopCoords[i], stopCoords[i + 1])));
     const t0 = performance.now();
@@ -405,16 +507,14 @@ function walkLeg() {
     const frame = (now) => {
       if (!playing) return resolve();
       const t = clamp((now - t0) / dur, 0, 1);
-      const p = lerp(start, end, ease(t));
+      const k = easeSine(t);
+      const x = fl ? k * fl.S : 0;
+      const f = f0 + (1 - f0) * (fl ? fl.fracAt(x) : k);
+      const p = t >= 1 ? i + 1 : i + legTAt(i, f);
       setProgress(p);
-      if (ui.follow.checked) {
-        const zoom = lerp(z0, ARRIVE_ZOOM, ease(t)) - hump * Math.sin(Math.PI * t);
-        map.jumpTo({
-          center: pointAt(p),
-          zoom,
-          bearing: lerp(b0, b1, ease(t)),
-          pitch: pitchFor(zoom),
-        });
+      if (fl && ui.follow.checked) {
+        const zoom = fl.zoomAt(x);
+        map.jumpTo({ center: pointAt(p), zoom, bearing: lerp(b0, b1, k), pitch: pitchFor(zoom) });
       }
       if (t < 1) raf = requestAnimationFrame(frame);
       else resolve();
@@ -423,18 +523,24 @@ function walkLeg() {
   });
 }
 
+const moveEnd = () => new Promise((r) => map.once('moveend', r));
+
 async function play() {
   if (progress >= LAST) { jumpTo(0, { fly: false }); await sleep(300); }
   setPlaying(true);
   if (ui.follow.checked && Math.abs(map.getZoom() - ARRIVE_ZOOM) > 0.5) {
+    const done = moveEnd();
     map.flyTo({ center: pointAt(progress), zoom: ARRIVE_ZOOM, pitch: pitchFor(ARRIVE_ZOOM), bearing: 0, duration: 2600 / speedVal, essential: true });
-    await sleep(2700 / speedVal);
+    await done;
   }
   while (playing && progress < LAST) {
     await walkLeg();
     if (!playing) break;
     setActive(Math.round(progress));
-    await sleep(1400 / speedVal);
+    const dwell = 1300 / speedVal;
+    // Slow drift while paused at a tirth, so the camera never fully freezes
+    if (ui.follow.checked) map.easeTo({ bearing: map.getBearing() + 3, duration: dwell, easing: (x) => x, essential: true });
+    await sleep(dwell);
   }
   setPlaying(false);
 }
@@ -478,6 +584,11 @@ const setExag = () => {
 ui.exag.oninput = setExag;
 ui.terrain.onchange = () => {
   map.setTerrain(ui.terrain.checked ? { source: 'terrain', exaggeration: parseFloat(ui.exag.value) } : null);
+};
+ui.weather.onchange = () => {
+  fx.setEnabled(ui.weather.checked);
+  wx = '';             // force label + sky refresh
+  updateWeather();
 };
 ui.contours.onchange = () => {
   const v = ui.contours.checked ? 'visible' : 'none';
