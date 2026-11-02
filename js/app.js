@@ -238,7 +238,13 @@ function setPlaying(on) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const speed = () => parseFloat(ui.speed.value);
-const legZoom = (km) => clamp(10.2 - Math.log2(Math.max(km, 5) / 8), 5.2, 10.5);
+// Zoom at which a leg of `km` fits comfortably on screen.
+const legZoom = (km) => clamp(Math.log2(41500 / Math.max(km, 4)), 5, 10);
+const ARRIVE_ZOOM = 9.2;
+// Flatter view when zoomed out, steeper when close to the terrain.
+const pitchFor = (zoom) => lerp(35, 62, clamp((zoom - 5) / 4, 0, 1));
+// Keep the map roughly north-up; sway gently toward the direction of travel.
+const swayBearing = (b) => clamp((((b + 180) % 360) - 180) * 0.3, -25, 25);
 
 function shortestAngle(from, to) {
   return from + ((((to - from) % 360) + 540) % 360) - 180;
@@ -252,10 +258,11 @@ function walkLeg() {
     const start = progress, end = i + 1;
     const km = legKm[i] * (end - start);
     const dur = clamp(1600 + km * 5, 1800, 7000) / speed();
-    const z0 = map.getZoom(), zEnd = legZoom(legKm[Math.min(i + 1, LAST - 1)]);
-    const hump = clamp(Math.log2(Math.max(km, 1) / 60), 0, 3);
+    const z0 = map.getZoom();
+    // Pull back mid-leg just enough to see the whole leg, then settle in on arrival.
+    const hump = Math.max(0, (z0 + ARRIVE_ZOOM) / 2 - Math.min(legZoom(km), ARRIVE_ZOOM));
     const b0 = map.getBearing();
-    const b1 = shortestAngle(b0, bearing(stopCoords[i], stopCoords[i + 1]));
+    const b1 = shortestAngle(b0, swayBearing(bearing(stopCoords[i], stopCoords[i + 1])));
     const t0 = performance.now();
 
     const frame = (now) => {
@@ -264,12 +271,12 @@ function walkLeg() {
       const p = lerp(start, end, ease(t));
       setProgress(p);
       if (ui.follow.checked) {
-        const zoom = lerp(z0, zEnd, ease(t)) - hump * Math.sin(Math.PI * t);
+        const zoom = lerp(z0, ARRIVE_ZOOM, ease(t)) - hump * Math.sin(Math.PI * t);
         map.jumpTo({
           center: pointAt(p),
           zoom,
-          bearing: lerp(b0, b1, ease(clamp(t * 1.6, 0, 1))),
-          pitch: 62,
+          bearing: lerp(b0, b1, ease(t)),
+          pitch: pitchFor(zoom),
         });
       }
       if (t < 1) raf = requestAnimationFrame(frame);
@@ -282,10 +289,9 @@ function walkLeg() {
 async function play() {
   if (progress >= LAST) { jumpTo(0, { fly: false }); await sleep(300); }
   setPlaying(true);
-  if (ui.follow.checked && Math.abs(map.getPitch() - 62) > 5) {
-    const i = Math.floor(progress + 1e-6);
-    map.flyTo({ center: pointAt(progress), zoom: legZoom(legKm[Math.min(i, LAST - 1)]), pitch: 62, duration: 2200 / speed() });
-    await sleep(2300 / speed());
+  if (ui.follow.checked && Math.abs(map.getZoom() - ARRIVE_ZOOM) > 0.5) {
+    map.flyTo({ center: pointAt(progress), zoom: ARRIVE_ZOOM, pitch: pitchFor(ARRIVE_ZOOM), bearing: 0, duration: 2600 / speed(), essential: true });
+    await sleep(2700 / speed());
   }
   while (playing && progress < LAST) {
     await walkLeg();
