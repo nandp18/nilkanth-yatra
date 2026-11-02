@@ -1,4 +1,4 @@
-// Builds js/skydata.js from the d3-celestial catalogs (BSD-3, © Olaf Frohn).
+// Builds js/data/skydata.js from the d3-celestial catalogs (BSD-3, © Olaf Frohn).
 // Run: node tools/build-sky.mjs
 import { writeFileSync } from 'node:fs';
 
@@ -53,5 +53,5 @@ export const LINES = ${JSON.stringify(L)};
 export const MW = ${JSON.stringify(M)};
 export const NAMES = ${JSON.stringify(N)};
 `;
-writeFileSync(new URL('../js/skydata.js', import.meta.url), out);
+writeFileSync(new URL('../js/data/skydata.js', import.meta.url), out);
 console.log(`stars ${S.length / 4}, lines ${L.length}, mw rings ${M.map((l) => l.length).join('/')}, names ${N.length}, ${(out.length / 1024).toFixed(0)} KB`);

@@ -24,13 +24,41 @@ Each stop's card has a **Night sky** section. It shows the sky over that town on
 
 The middle dates are **estimates** (shown with ≈). They spread the seven years along the route and include the long stays described in BAPS / swaminarayan.org biographies: about 2½ months at Muktinath, 9 months with Gopal Yogi (finishing in 1794) and about 6 months at Jagannath Puri. To correct a date, edit `OVERRIDES` in `js/chronology.js`.
 
+## Print edition
+
+`print.html` (the **Print map** link in the app) draws an antique-style chart of the whole journey as a single vector SVG:
+- relief engraved from elevation tiles at about 220 dpi
+- water-lined coasts and a degree-ruled border
+- compass rose and scale bar
+- the 65 tirths keyed in the Indian Ocean, as on the original map
+
+You can pick 12 × 16, 18 × 24 or 24 × 32 in; all three are 3:4 and fit standard frames. Then **Print / Save PDF**: set margins to *None* and turn on *Background graphics*. Or download the SVG for a print shop.
+
 ## Run
 
 No build step. ES modules need a local server:
 
 ```sh
-python3 -m http.server 8000
-# open http://localhost:8000
+npm start            # python3 -m http.server 8000, then open http://localhost:8000
+```
+
+## Project layout
+
+```
+index.html            interactive map
+print.html            print edition
+css/                  app.css, print.css
+js/
+  app.js              map, playback engine, labels, UI
+  weather.js          weather overlay + live elevation sampling
+  sky.js              night sky (astronomy, chart, 3D dome); loaded on demand
+  chronology.js       estimated date for each stop
+  print.js            print edition renderer
+  data/
+    stops.js          the 65 tirths, cities, map labels
+    skydata.js        generated: star catalog       (npm run build:sky)
+    printdata.js      generated: coastline, rivers  (npm run build:print)
+tools/                data generators
 ```
 
 ## Controls
@@ -47,5 +75,6 @@ python3 -m http.server 8000
 - [MapLibre GL JS](https://maplibre.org/) 5.24 for the 3D terrain, hillshade and `color-relief` elevation coloring
 - [maplibre-contour](https://github.com/onthegomap/maplibre-contour), which generates contour lines on the fly from the DEM
 - AWS/Mapzen Terrarium tiles for elevation (including sea depths), OpenFreeMap vector tiles for water, rivers and borders, and Esri World Imagery for the satellite style
+- Coastlines and rivers for the print edition come from [Natural Earth](https://www.naturalearthdata.com/) (public domain).
 - Star catalog, constellation lines and Milky Way contours come from [d3-celestial](https://github.com/ofrohn/d3-celestial) (BSD-3). Rebuild them with `node tools/build-sky.mjs`.
-- Stop data lives in `js/stops.js`. Coordinates are best-effort identifications, and uncertain ones are flagged `approx`.
+- Stop data lives in `js/data/stops.js`. Coordinates are best-effort identifications, and uncertain ones are flagged `approx`.

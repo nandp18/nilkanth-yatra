@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Van Vicharan — Print Edition</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="css/print.css" rel="stylesheet" />
+</head>
+<body>
+  <header class="toolbar">
+    <a href="./" class="back">← Back to the journey</a>
+    <div class="sizes" role="radiogroup" aria-label="Print size">
+      <span>Size</span>
+      <button data-size="12x16">12 × 16 in</button>
+      <button data-size="18x24" class="on">18 × 24 in</button>
+      <button data-size="24x32">24 × 32 in</button>
+    </div>
+    <span class="status" id="status">Engraving relief…</span>
+    <button id="btn-svg" class="ghost" disabled>Download SVG</button>
+    <button id="btn-print" class="primary" disabled>Print / Save PDF</button>
+  </header>
+
+  <main class="sheet-wrap">
+    <div class="sheet" id="sheet"></div>
+    <p class="hint">Vector map: prints sharp at any size. In the print dialog choose <b>Save as PDF</b>, set margins to <b>None</b>, and turn on <b>Background graphics</b>.</p>
+  </main>
+
+  <script type="module" src="js/print.js"></script>
+</body>
+</html>

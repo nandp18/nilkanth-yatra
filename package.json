@@ -1,0 +1,12 @@
+{
+  "name": "nilkanth-yatra",
+  "private": true,
+  "description": "Interactive 3D topographic map and print edition of Nilkanth Varni's Van Vicharan (1792–1799)",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "build:sky": "node tools/build-sky.mjs",
+    "build:print": "node tools/build-print.mjs",
+    "build:data": "npm run build:sky && npm run build:print"
+  }
+}

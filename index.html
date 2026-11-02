@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <link href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" rel="stylesheet" />
-  <link href="style.css" rel="stylesheet" />
+  <link href="css/app.css" rel="stylesheet" />
 </head>
 <body>
   <aside id="panel">
@@ -51,6 +51,9 @@
           <button data-v="satellite">Satellite</button>
         </div>
         <button id="btn-overview" class="link">Overview</button>
+        <a href="print.html" class="link print-link" title="A print-ready vintage chart of the journey">
+          <svg viewBox="0 0 16 16"><path d="M4.5 6V2h7v4M4.5 12H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-1.5M4.5 9.5h7V14h-7z" /></svg>Print map
+        </a>
       </div>
       <div class="row">
         <label class="chip"><input type="checkbox" id="tg-terrain" checked /><span>3D</span></label>

@@ -15,7 +15,7 @@
 // distance, 40% shared equally between stops. Every middle date is an estimate;
 // override any of them with OVERRIDES below (1-based stop number -> 'YYYY-MM-DD').
 
-import { STOPS } from './stops.js';
+import { STOPS } from './data/stops.js';
 
 const DAY = 86400000;
 export const START = Date.UTC(1792, 5, 29);

@@ -3,7 +3,7 @@
 // Moon's nakshatra. Renders as a 2D chart (for the card) or as a 3D sky dome
 // matched to the MapLibre camera.
 import * as A from 'https://unpkg.com/astronomy-engine@2.1.19/esm/astronomy.js';
-import { STARS, LINES, MW, NAMES } from './skydata.js';
+import { STARS, LINES, MW, NAMES } from './data/skydata.js';
 
 const RAD = Math.PI / 180;
 

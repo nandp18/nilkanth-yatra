@@ -1,0 +1,51 @@
+/* Print edition page. On screen: a toolbar and the sheet scaled to fit.
+   In print: only the sheet, edge to edge, at the chosen size (set from JS via @page). */
+:root {
+  --ink: #1e1a16;
+  --muted: #8b8378;
+  --rule: #ece7df;
+  --saffron: #e2701b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #ffffff; color: var(--ink); font: 400 14px/1.45 Inter, system-ui, sans-serif; }
+
+.toolbar {
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 14px;
+  padding: 12px 24px; background: #fff; border-bottom: 1px solid var(--rule);
+}
+.toolbar .back { color: var(--ink); text-decoration: none; font-weight: 500; margin-right: auto; }
+.toolbar .back:hover { text-decoration: underline; text-underline-offset: 3px; }
+.sizes { display: inline-flex; align-items: center; gap: 2px; background: #f7f4ef; border-radius: 8px; padding: 2px; }
+.sizes span { font-size: 12px; color: var(--muted); padding: 0 8px; }
+.sizes button {
+  border: 0; background: none; border-radius: 6px; padding: 6px 10px; cursor: pointer;
+  font: 500 12px Inter, system-ui, sans-serif; color: var(--muted);
+}
+.sizes button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.status { font-size: 12px; color: var(--muted); min-width: 150px; text-align: right; }
+.toolbar button.primary, .toolbar button.ghost {
+  height: 36px; padding: 0 16px; border-radius: 999px; cursor: pointer; font: 500 13px Inter, system-ui, sans-serif;
+}
+.toolbar button.primary { background: var(--ink); color: #fff; border: 1px solid var(--ink); }
+.toolbar button.primary:hover:not(:disabled) { background: #000; }
+.toolbar button.ghost { background: #fff; color: var(--ink); border: 1px solid var(--rule); }
+.toolbar button.ghost:hover:not(:disabled) { border-color: var(--ink); }
+.toolbar button:disabled { opacity: .4; cursor: progress; }
+
+.sheet-wrap { display: flex; flex-direction: column; align-items: center; padding: 32px 24px 48px; }
+.sheet {
+  width: min(100%, calc((100vh - 150px) * 0.75)); aspect-ratio: 3 / 4;
+  background: #f1e6c8; box-shadow: 0 2px 6px rgba(0,0,0,.12), 0 18px 48px rgba(60,40,20,.22);
+  display: grid; place-items: center;
+}
+.sheet:empty::after { content: 'Engraving relief from elevation data…'; font: italic 18px Georgia, serif; color: #8b6e4a; }
+.sheet svg { width: 100%; height: 100%; display: block; }
+.hint { max-width: 640px; text-align: center; color: var(--muted); font-size: 12.5px; margin-top: 18px; }
+
+@media print {
+  .toolbar, .hint { display: none; }
+  html, body { background: none; }
+  .sheet-wrap { padding: 0; display: block; }
+  .sheet { width: auto; box-shadow: none; aspect-ratio: auto; display: block; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

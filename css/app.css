@@ -116,6 +116,9 @@ h1 em { font-style: italic; color: var(--saffron); }
   text-decoration-color: var(--faint); text-underline-offset: 3px;
 }
 .view .link:hover { text-decoration-color: var(--ink); }
+.view .print-link { margin-left: 14px; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+.view .print-link svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linejoin: round; }
+.view .print-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .chip { cursor: pointer; }
 .chip input { position: absolute; opacity: 0; pointer-events: none; }
 .chip span {

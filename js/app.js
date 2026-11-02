@@ -1,4 +1,4 @@
-import { STOPS, CITIES, AREAS, REGIONS, REGION_SHORT } from './stops.js';
+import { STOPS, CITIES, AREAS, REGIONS, REGION_SHORT } from './data/stops.js';
 import { WeatherFX, WEATHER_LABEL, WEATHER_SKY, elevationAt } from './weather.js';
 import { buildChronology } from './chronology.js';
 
