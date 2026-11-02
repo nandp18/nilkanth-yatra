@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nilkanth Yatra — The Forest Journey, 1792–1799</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22><circle cx=%2210%22 cy=%2210%22 r=%229%22 fill=%22%23f5d10f%22 stroke=%22%233b3204%22/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <link href="style.css" rel="stylesheet" />
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <div class="eyebrow">Van Vicharan · 1792 – 1799</div>
+      <h1>Nilkanth<br />Yatra</h1>
+      <p class="lede">
+        At eleven, Ghanshyam left Ayodhya barefoot as the ascetic Nilkanth Varni.
+        For seven years he walked the length of the subcontinent — Himalaya to
+        Kanyakumari — before arriving at Loj in Saurashtra.
+      </p>
+      <dl class="stats">
+        <div><dt>Tirths</dt><dd>65</dd></div>
+        <div><dt>Route mapped</dt><dd id="stat-km">—</dd></div>
+        <div><dt>Duration</dt><dd>7y 1m 11d</dd></div>
+      </dl>
+    </header>
+
+    <div class="controls">
+      <button id="btn-prev" title="Previous stop (←)" aria-label="Previous stop">‹</button>
+      <button id="btn-play" class="primary" title="Play / pause (space)">▶ Begin the journey</button>
+      <button id="btn-next" title="Next stop (→)" aria-label="Next stop">›</button>
+    </div>
+    <div class="toggles">
+      <label><input type="checkbox" id="tg-terrain" checked /> 3D terrain</label>
+      <label><input type="checkbox" id="tg-contours" checked /> Contours</label>
+      <label><input type="checkbox" id="tg-follow" checked /> Follow cam</label>
+      <label class="range">Relief <input type="range" id="rg-exag" min="0.5" max="4" step="0.1" value="1.8" /></label>
+      <label class="range">Speed
+        <select id="sel-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
+      </label>
+      <button id="btn-overview" class="link">Overview</button>
+    </div>
+
+    <ol id="stop-list"></ol>
+
+    <footer>
+      Imagery © Esri, Maxar · Elevation: Mapzen Terrain Tiles · Positions approximate.
+    </footer>
+  </aside>
+
+  <main id="map"></main>
+
+  <div id="card" class="hidden">
+    <div class="num" id="card-num">1</div>
+    <div class="body">
+      <div class="region" id="card-region"></div>
+      <div class="name" id="card-name"></div>
+      <div class="alt" id="card-alt"></div>
+      <div class="note" id="card-note"></div>
+      <div class="meta" id="card-meta"></div>
+    </div>
+  </div>
+
+  <div id="timeline">
+    <input type="range" id="scrub" min="0" max="64" step="0.001" value="0" aria-label="Journey progress" />
+    <div class="ticks" id="ticks"></div>
+  </div>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/maplibre-contour@0.0.5/dist/index.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
