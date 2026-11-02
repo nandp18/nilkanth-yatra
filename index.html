@@ -4,22 +4,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Nilkanth Yatra — The Forest Journey, 1792–1799</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22><circle cx=%2210%22 cy=%2210%22 r=%229%22 fill=%22%23f5d10f%22 stroke=%22%233b3204%22/></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22><circle cx=%2210%22 cy=%2210%22 r=%228%22 fill=%22%23F2C230%22 stroke=%22%231E1A16%22 stroke-width=%221.5%22/></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" rel="stylesheet" />
   <link href="style.css" rel="stylesheet" />
 </head>
 <body>
   <aside id="panel">
-    <header>
-      <div class="eyebrow">Van Vicharan · 1792 – 1799</div>
-      <h1>Nilkanth<br />Yatra</h1>
+    <header class="intro">
+      <div class="eyebrow">Van Vicharan <span>1792 – 1799</span></div>
+      <h1>Nilkanth <em>Yatra</em></h1>
       <p class="lede">
-        At eleven, Ghanshyam left Ayodhya barefoot as the ascetic Nilkanth Varni.
-        For seven years he walked the length of the subcontinent — Himalaya to
-        Kanyakumari — before arriving at Loj in Saurashtra.
+        At eleven, Ghanshyam left Ayodhya as the ascetic Nilkanth Varni and walked
+        for seven years: through the Himalaya, down to Kanyakumari, and on to Loj.
       </p>
       <dl class="stats">
         <div><dt>Tirths</dt><dd>65</dd></div>
@@ -28,49 +27,83 @@
       </dl>
     </header>
 
-    <div class="controls">
-      <button id="btn-prev" title="Previous stop (←)" aria-label="Previous stop">‹</button>
-      <button id="btn-play" class="primary" title="Play / pause (space)">▶ Begin the journey</button>
-      <button id="btn-next" title="Next stop (→)" aria-label="Next stop">›</button>
-    </div>
-    <div class="toggles">
-      <label><input type="checkbox" id="tg-terrain" checked /> 3D terrain</label>
-      <label><input type="checkbox" id="tg-contours" checked /> Contours</label>
-      <label><input type="checkbox" id="tg-follow" checked /> Follow cam</label>
-      <label class="range">Relief <input type="range" id="rg-exag" min="0.5" max="4" step="0.1" value="1.8" /></label>
-      <label class="range">Speed
-        <select id="sel-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
-      </label>
-      <button id="btn-overview" class="link">Overview</button>
-    </div>
+    <section class="player">
+      <div class="transport">
+        <button id="btn-prev" class="icon" title="Previous stop (←)" aria-label="Previous stop">
+          <svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5" /></svg>
+        </button>
+        <button id="btn-play" class="play" title="Play / pause (space)">
+          <svg class="i-play" viewBox="0 0 16 16"><path d="M5 3.2v9.6L12.5 8z" /></svg>
+          <svg class="i-pause" viewBox="0 0 16 16"><path d="M5 3h2v10H5zM9 3h2v10H9z" /></svg>
+          <span id="play-label">Begin the journey</span>
+        </button>
+        <button id="btn-next" class="icon" title="Next stop (→)" aria-label="Next stop">
+          <svg viewBox="0 0 16 16"><path d="m6 3 5 5-5 5" /></svg>
+        </button>
+      </div>
+      <div class="readout"><span id="ro-stop">Stop 1 of 65</span><span id="ro-km">0 km walked</span></div>
+    </section>
+
+    <section class="view">
+      <div class="row">
+        <div class="seg" id="seg-style" role="radiogroup" aria-label="Map style">
+          <button data-v="atlas" class="on">Atlas</button>
+          <button data-v="satellite">Satellite</button>
+        </div>
+        <button id="btn-overview" class="link">Overview</button>
+      </div>
+      <div class="row">
+        <label class="chip"><input type="checkbox" id="tg-terrain" checked /><span>3D</span></label>
+        <label class="chip"><input type="checkbox" id="tg-contours" checked /><span>Contours</span></label>
+        <label class="chip"><input type="checkbox" id="tg-follow" checked /><span>Follow</span></label>
+      </div>
+      <div class="row">
+        <label class="field">Relief
+          <input type="range" id="rg-exag" class="thin" min="0.5" max="4" step="0.1" value="1.8" />
+          <output id="out-exag">1.8×</output>
+        </label>
+        <div class="seg small" id="seg-speed" role="radiogroup" aria-label="Speed">
+          <button data-v="0.5">½×</button>
+          <button data-v="1" class="on">1×</button>
+          <button data-v="2">2×</button>
+          <button data-v="4">4×</button>
+        </div>
+      </div>
+    </section>
 
     <ol id="stop-list"></ol>
 
     <footer>
-      Imagery © Esri, Maxar · Elevation: Mapzen Terrain Tiles · Positions approximate.
+      Elevation: Mapzen Terrain Tiles · Vector data © OpenStreetMap, OpenFreeMap · Imagery © Esri.
+      Locations are approximate.
     </footer>
   </aside>
 
   <main id="map"></main>
 
-  <div id="card" class="hidden">
-    <div class="num" id="card-num">1</div>
-    <div class="body">
-      <div class="region" id="card-region"></div>
-      <div class="name" id="card-name"></div>
+  <article id="card" class="hidden" aria-live="polite">
+    <div class="card-in">
+      <div class="card-top">
+        <span class="badge" id="card-num">1</span>
+        <span class="region" id="card-region"></span>
+      </div>
+      <h2 id="card-name"></h2>
       <div class="alt" id="card-alt"></div>
-      <div class="note" id="card-note"></div>
-      <div class="meta" id="card-meta"></div>
+      <p class="note" id="card-note"></p>
+      <div class="meta">
+        <div><b id="card-leg">—</b><small>from previous</small></div>
+        <div><b id="card-total">0 km</b><small>into the journey</small></div>
+      </div>
     </div>
-  </div>
+  </article>
 
   <div id="timeline">
     <input type="range" id="scrub" min="0" max="64" step="0.001" value="0" aria-label="Journey progress" />
-    <div class="ticks" id="ticks"></div>
+    <div class="regions" id="tl-regions"></div>
   </div>
 
-  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-  <script src="https://unpkg.com/maplibre-contour@0.0.5/dist/index.min.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/maplibre-contour@0.1.1/dist/index.min.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

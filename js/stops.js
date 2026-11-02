@@ -15,6 +15,11 @@ export const REGIONS = {
   gujarat: 'Gujarat',
 };
 
+export const REGION_SHORT = {
+  awadh: 'Awadh', himalaya: 'Himalaya', nepal: 'Nepal', east: 'Northeast', coast: 'East Coast',
+  tamil: 'Tamil', south: 'Kerala', deccan: 'Deccan', maharashtra: 'Maharashtra', gujarat: 'Gujarat',
+};
+
 export const STOPS = [
   { name: 'Chhapaiya', lat: 26.890, lon: 82.390, region: 'awadh', note: 'Birthplace of Ghanshyam, 1781.' },
   { name: 'Ayodhya', lat: 26.799, lon: 82.204, region: 'awadh', note: 'Leaves home on 29 June 1792, aged eleven.' },
@@ -83,28 +88,34 @@ export const STOPS = [
   { name: 'Loj', lat: 21.170, lon: 70.200, region: 'gujarat', note: 'Journey ends 21 August 1799 at Ramanand Swami’s ashram.' },
 ].map((s, i) => ({ ...s, n: i + 1 }));
 
-// Reference cities from the original map (yellow tags with red bars)
+// Reference cities from the original map. Minor ones appear only when zoomed in.
 export const CITIES = [
   { name: 'New Delhi', lat: 28.614, lon: 77.209 },
-  { name: 'Lucknow', lat: 26.847, lon: 80.947 },
+  { name: 'Lucknow', lat: 26.847, lon: 80.947, side: 'left' },
   { name: 'Kolkata', lat: 22.573, lon: 88.364 },
   { name: 'Ahmedabad', lat: 23.023, lon: 72.571 },
   { name: 'Mumbai', lat: 19.076, lon: 72.878 },
   { name: 'Hyderabad', lat: 17.385, lon: 78.487 },
-  { name: 'Bangalore', lat: 12.972, lon: 77.595 },
+  { name: 'Bangalore', lat: 12.972, lon: 77.595, side: 'left' },
   { name: 'Chennai', lat: 13.083, lon: 80.271 },
-  { name: 'Mysore', lat: 12.296, lon: 76.639 },
-  { name: 'Coimbatore', lat: 11.017, lon: 76.956 },
-  { name: 'Kochi', lat: 9.931, lon: 76.267 },
-  { name: 'Puducherry', lat: 11.934, lon: 79.830 },
-  { name: 'Thiruvananthapuram', lat: 8.524, lon: 76.936 },
+  { name: 'Mysore', lat: 12.296, lon: 76.639, minor: true },
+  { name: 'Coimbatore', lat: 11.017, lon: 76.956, minor: true },
+  { name: 'Kochi', lat: 9.931, lon: 76.267, minor: true },
+  { name: 'Puducherry', lat: 11.934, lon: 79.830, minor: true },
+  { name: 'Thiruvananthapuram', lat: 8.524, lon: 76.936, minor: true },
 ];
 
-export const COUNTRIES = [
-  { name: 'India', lat: 22.8, lon: 79.6, size: 'xl' },
-  { name: 'Nepal', lat: 28.9, lon: 82.6 },
-  { name: 'Bhutan', lat: 27.5, lon: 90.4 },
-  { name: 'Tibet', lat: 32.2, lon: 86.0 },
-  { name: 'Bangladesh', lat: 24.0, lon: 90.3 },
-  { name: 'Sri Lanka', lat: 7.6, lon: 80.7 },
+// Large atlas-style labels, hidden once you zoom in
+export const AREAS = [
+  { name: 'India', lat: 23.6, lon: 79.4, kind: 'country xl' },
+  { name: 'Nepal', lat: 29.4, lon: 81.6, kind: 'country' },
+  { name: 'Bhutan', lat: 27.55, lon: 90.4, kind: 'country' },
+  { name: 'Tibet', lat: 32.3, lon: 85.5, kind: 'country' },
+  { name: 'Bangladesh', lat: 23.95, lon: 89.9, kind: 'country' },
+  { name: 'Sri Lanka', lat: 7.5, lon: 80.7, kind: 'country' },
+  { name: 'Arabian Sea', lat: 15.5, lon: 66.5, kind: 'sea' },
+  { name: 'Bay of Bengal', lat: 15.8, lon: 87.5, kind: 'sea' },
+  { name: 'Indian Ocean', lat: 5.2, lon: 75.0, kind: 'sea' },
+  { name: 'Himalaya', lat: 29.7, lon: 89.6, kind: 'range', rotate: -10 },
+  { name: 'Thar Desert', lat: 26.6, lon: 71.4, kind: 'range' },
 ];
