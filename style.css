@@ -213,6 +213,34 @@ input[type=range].thin::-moz-range-thumb { width: 10px; height: 10px; border-rad
 @keyframes pop { 40% { transform: scale(1.35); } }
 @keyframes ripple { from { transform: scale(1); opacity: .9; } to { transform: scale(2.6); opacity: 0; } }
 
+/* Walking-view names beside the discs (placement + collisions handled in JS) */
+.stop-marker .slabel {
+  position: absolute; top: 50%; left: calc(100% + 7px); transform: translateY(-50%);
+  white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .25s;
+  /* a real outline reads on snow and hillshade where a soft glow doesn't */
+  -webkit-text-stroke: 3.5px rgba(255,255,255,.92); paint-order: stroke fill;
+  text-shadow: 0 1px 6px rgba(255,255,255,.9);
+}
+.stop-marker .slabel.l { left: auto; right: calc(100% + 7px); text-align: right; }
+.stop-marker.active .slabel { left: calc(100% + 11px); }
+.stop-marker.active .slabel.l { left: auto; right: calc(100% + 11px); }
+.stop-marker .slabel.on { opacity: 1; }
+.stop-marker .slabel b { display: block; font: 400 15px/1.05 var(--serif); color: #7a7166; }
+.stop-marker.visited .slabel b { color: var(--ink-2); }
+.stop-marker.active .slabel b { color: var(--ink); font-size: 17px; }
+.stop-marker .slabel small { display: none; }
+.stop-marker .slabel.next small {
+  display: block; margin-top: 3px;
+  font: 600 9.5px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--saffron);
+  -webkit-text-stroke-width: 2.5px;
+}
+.stop-marker:has(.slabel.on):hover .tip { opacity: 0; }
+.theme-satellite .stop-marker .slabel { -webkit-text-stroke: 3.5px rgba(20,16,12,.7); text-shadow: 0 1px 6px rgba(0,0,0,.6); }
+.theme-satellite .stop-marker .slabel b { color: rgba(255,255,255,.75); }
+.theme-satellite .stop-marker.visited .slabel b, .theme-satellite .stop-marker.active .slabel b { color: #fff; }
+.theme-satellite .stop-marker .slabel.next small { color: #ffc27a; }
+.z-far .stop-marker .slabel { display: none; }
+
 /* Overview: dots, not numbers */
 .z-far .stop-marker { width: 7px; height: 7px; }
 .z-far .stop-marker.key { width: 9px; height: 9px; }
@@ -319,7 +347,7 @@ input[type=range].thin::-moz-range-thumb { width: 10px; height: 10px; border-rad
 /* ============================================================
    Weather overlay
    ============================================================ */
-#fx-layer { position: absolute; top: 0; bottom: 0; left: var(--panel-w); right: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+#fx-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 #fx { position: absolute; inset: 0; width: 100%; height: 100%; }
 #fx-tint { position: absolute; inset: 0; opacity: 0; will-change: opacity; }
 #fx-tint[data-wx=snow] { background: radial-gradient(ellipse at 50% 45%, rgba(235,242,248,0) 35%, rgba(228,237,245,.6) 100%), linear-gradient(rgba(220,232,242,.22), rgba(220,232,242,.22)); }
@@ -370,7 +398,6 @@ input[type=range].thin::-moz-range-thumb { width: 10px; height: 10px; border-rad
   .lede, .stats { display: none; }
   #card { left: 12px; right: 12px; top: 12px; width: auto; }
   #timeline { left: 12px; right: 12px; bottom: calc(46% + 12px); }
-  #fx-layer { left: 0; bottom: 46%; }
   .regions { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {

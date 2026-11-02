@@ -276,7 +276,9 @@ class FlatMarker extends maplibregl.Marker {
 const stopMarkers = STOPS.map((s, i) => {
   const el = document.createElement('div');
   el.className = `stop-marker${s.key ? ` key side-${s.side}` : ''}`;
-  el.innerHTML = `<div class="disc">${s.n}</div><div class="tip">${s.n} · ${s.name}</div>${s.key ? `<div class="mlabel">${s.key}</div>` : ''}`;
+  el.innerHTML = `<div class="disc">${s.n}</div><div class="tip">${s.n} · ${s.name}</div>` +
+    `<div class="slabel"><b>${s.name}</b><small></small></div>` +
+    (s.key ? `<div class="mlabel">${s.key}</div>` : '');
   el.addEventListener('click', (e) => { e.stopPropagation(); jumpTo(i); });
   return new FlatMarker({ element: el }).setLngLat([s.lon, s.lat]).addTo(map);
 });
@@ -322,6 +324,7 @@ function setProgress(p) {
   if (!playing || now - lastUi > 120) {
     lastUi = now;
     ui.roKm.textContent = `${fmtKm(kmAt(progress))} walked`;
+    updateNextLabel();
   }
   if (!playing || now - lastWx > 250) {
     lastWx = now;
@@ -384,6 +387,9 @@ function drawWalked() {
 }
 
 // ---------- Weather ----------
+// Weather sits between the map canvas and the HTML markers, so snow and rain
+// fall behind the stop names rather than washing them out.
+map.getCanvasContainer().insertBefore($('fx-layer'), map.getCanvas().nextSibling);
 const fx = new WeatherFX($('fx'), $('fx-tint'));
 const RAINY = new Set([19, 20, 21, 22, 23, 24, 25, 44, 45, 46, 47]);   // monsoon belts: Bengal, Northeast, Kerala
 const HOT = new Set(['gujarat', 'deccan', 'maharashtra']);
@@ -636,6 +642,77 @@ window.addEventListener('keydown', (e) => {
   map.getCanvasContainer().addEventListener(ev, () => playing && setPlaying(false), { passive: true }));
 
 // Marker size and label density follow zoom
+// ---------- Walking-view stop labels ----------
+// Names beside the numbered discs, placed right or left of the disc, or hidden
+// when they would collide. Current and next stop get first claim on space.
+const FAR_Z = 6.2;
+const slabels = stopMarkers.map((m) => m.getElement().querySelector('.slabel'));
+const slabelState = STOPS.map(() => '');      // '', 'r' or 'l'
+let labelW = STOPS.map((s) => s.name.length * 7);
+let nextIdx = -1;
+
+document.fonts.ready.then(() => {
+  const g = document.createElement('canvas').getContext('2d');
+  g.font = '400 15px "Instrument Serif"';
+  labelW = STOPS.map((s) => Math.ceil(g.measureText(s.name).width) + 2);
+  layoutLabels();
+});
+
+function updateNextLabel() {
+  const n = progress >= LAST ? -1 : Math.floor(progress + 1e-6) + 1;
+  if (n !== nextIdx) {
+    if (nextIdx >= 0) { slabels[nextIdx].classList.remove('next'); slabels[nextIdx].lastChild.textContent = ''; }
+    nextIdx = n;
+    if (n >= 0) slabels[n].classList.add('next');
+    lastLayout = 0;   // label heights changed
+  }
+  if (n >= 0) slabels[n].lastChild.textContent = `Next · ${fmtKm(Math.max(0, cumKm[n] - kmAt(progress)))}`;
+}
+
+let lastLayout = 0;
+let mapW = 0, mapH = 0;
+new ResizeObserver(() => { ({ width: mapW, height: mapH } = container.getBoundingClientRect()); }).observe(container);
+
+function layoutLabels() {
+  lastLayout = performance.now();
+  if (map.getZoom() < FAR_Z) return;
+  const ms = parseFloat(container.style.getPropertyValue('--ms')) || 18;
+  const pts = stopCoords.map((c) => map.project(c));
+  const onScreen = (p) => p.x > -60 && p.x < mapW + 60 && p.y > -30 && p.y < mapH + 30;
+  // Discs are obstacles too, so a name never sits on top of another stop
+  const boxes = [];
+  pts.forEach((p, i) => {
+    if (!onScreen(p)) return;
+    const r = (i === active ? ms * 0.7 : ms / 2) + 1;
+    boxes.push([p.x - r, p.y - r, p.x + r, p.y + r, i]);
+  });
+  const hits = (b, self) => boxes.some((o) => o[4] !== self && b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
+
+  const order = STOPS.map((_, i) => i).sort((a, b) => {
+    const pri = (i) => (i === active ? -2 : i === nextIdx ? -1 : Math.abs(i - progress));
+    return pri(a) - pri(b);
+  });
+  for (const i of order) {
+    let want = '';
+    const p = pts[i];
+    if (onScreen(p)) {
+      const gap = (i === active ? ms * 0.7 : ms / 2) + 7;
+      const w = labelW[i], h = i === nextIdx ? 30 : 17;
+      const right = [p.x + gap, p.y - h / 2, p.x + gap + w, p.y + h / 2, -1];
+      const left = [p.x - gap - w, p.y - h / 2, p.x - gap, p.y + h / 2, -1];
+      if (!hits(right, i)) { want = 'r'; boxes.push(right); }
+      else if (!hits(left, i)) { want = 'l'; boxes.push(left); }
+    }
+    if (want !== slabelState[i]) {
+      slabelState[i] = want;
+      slabels[i].classList.toggle('on', want !== '');
+      slabels[i].classList.toggle('l', want === 'l');
+    }
+  }
+}
+map.on('move', () => { if (performance.now() - lastLayout > 120) layoutLabels(); });
+map.on('moveend', layoutLabels);
+
 function onZoom() {
   const z = map.getZoom();
   container.style.setProperty('--ms', `${clamp(lerp(15, 22, (z - 4) / 5), 15, 22).toFixed(1)}px`);
