@@ -14,7 +14,11 @@ html, body { margin: 0; background: #ffffff; color: var(--ink); font: 400 14px/1
   padding: 12px 24px; background: #fff; border-bottom: 1px solid var(--rule); white-space: nowrap;
 }
 .toolbar > * { flex: none; }
-.toolbar .controls { display: flex; gap: 12px; margin: 0 auto; }
+.toolbar { flex-wrap: wrap; row-gap: 10px; }
+.toolbar .back { margin-right: auto; }
+/* the pickers get a row of their own under the back link and export buttons */
+.toolbar .controls { order: 3; flex: 1 0 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 12px; }
+.seg[hidden] { display: none; }
 .toolbar .back { color: var(--ink); text-decoration: none; font-weight: 500; }
 .toolbar .back:hover { text-decoration: underline; text-underline-offset: 3px; }
 .seg { display: inline-flex; align-items: center; gap: 2px; background: #f7f4ef; border-radius: 8px; padding: 2px; }

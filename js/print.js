@@ -10,7 +10,15 @@ const EXTENT = { lon0: 66.5, lon1: 97.5, lat0: 5.5, lat1: 35.5 };      // Classi
 // Route bounds plus breathing room; the Map layout grows this to fill its frame
 const ROUTE_BOX = { lon0: 67.2, lon1: 98.6, lat0: 6.0, lat1: 32.8 };
 
-export const LAYOUTS = { classic: 'Classic', map: 'Map' };
+export const LAYOUTS = { classic: 'Classic', map: 'Map', detail: 'Detail', strip: 'Strip', profile: 'Profile', panorama: 'Panorama', line: 'Line' };
+
+// Regional detail sheets: the stops they cover (1-based, inclusive) and their title
+export const DETAILS = {
+  north: { label: 'Himalaya', title: 'The Himalaya & Nepal', from: 1, to: 18 },
+  east: { label: 'East', title: 'Bengal, the Northeast & the Eastern Coast', from: 19, to: 29 },
+  south: { label: 'South', title: 'The Tamil Country, Kerala & the Deccan', from: 30, to: 51 },
+  west: { label: 'West', title: 'Maharashtra & Gujarat', from: 52, to: 65 },
+};
 
 export const FORMATS = {
   // Home printers can't print to the edge, so the test sheet sits inside ¼ in margins on Letter
@@ -88,6 +96,21 @@ export const STYLES = {
     tone: (c, hs) => { const s = Math.min(1.3, 0.3 + 1.05 * hs); return [c[0] * s, c[1] * s, c[2] * s]; },
     fx: { mottle: null, grain: [1, 1, 1, 0.5, -0.32], grainOpacity: 0.3, vignette: ['#000000', 0.5], waterLines: 0.8, grat: 0.16, glow: true },
   },
+  // Pahari (Kangra/Guler) miniature painting: flat painted grounds, outlined hills, little
+  // mountains and trees, patterned water, a lapis rule and a gold-flecked pink margin
+  pahari: {
+    label: 'Pahari', note: 'Painted grounds, hills and trees, after Pahari miniature painting',
+    C: { ink: '#2e1a10', ink2: '#4e2c1a', ink3: '#5c3520', ink4: '#6b4a34', red: '#b8261a', water: '#1f3f5e',
+      paper: '#f2e6c8', sea: '#8db0b8', seaLine: '#8db0b8', key: '#f3d27a',
+      margin: '#dfa38b', lapis: '#22345c', gold: '#c49a3c', wave: '#eef4ef' },
+    paint: {
+      outline: 0.66,
+      bands: [[0, [190, 198, 140]], [300, [170, 184, 116]], [800, [200, 180, 108]], [1600, [176, 140, 96]],
+        [3000, [178, 160, 160]], [5700, [246, 241, 230]]],
+    },
+    fx: { mottle: [0.45, 0.3, 0.15, 0.4, -0.16], grain: [0.3, 0.2, 0.1, 0.5, -0.14], grainOpacity: 0.3,
+      vignette: null, waterLines: 0.45, grat: 0, motifs: true, waves: true, frame: 'miniature' },
+  },
 };
 // The palette the drawing helpers read; buildSheet points it at the chosen style
 const C = { ...STYLES.antique.C };
@@ -106,7 +129,8 @@ function mapFrame(fmt) {
 
 // Geographic extent for a layout: Classic is fixed; Map grows the route box to the
 // frame's proportions, giving most of the extra height to the open sea in the south
-export function extentFor(fmt, layout) {
+export function extentFor(fmt, layout, region = 'north') {
+  if (layout === 'detail') return detailExtent(fmt, region);
   if (layout !== 'map') return EXTENT;
   const F = mapFrame(fmt), aspect = F.h / F.w;
   let { lon0, lon1, lat0, lat1 } = ROUTE_BOX;
@@ -121,6 +145,18 @@ export function extentFor(fmt, layout) {
   }
   const r = (v) => Math.round(v * 1000) / 1000;
   return { lon0: r(lon0), lon1: r(lon1), lat0: r(latOfMerc(m0)), lat1: r(latOfMerc(m1)) };
+}
+// Detail: the region's stops plus a margin, grown on whichever axis the frame needs
+function detailExtent(fmt, region) {
+  const D = DETAILS[region] || DETAILS.north, F = mapFrame(fmt), aspect = F.h / F.w;
+  const ss = STOPS.slice(D.from - 1, D.to);
+  let lon0 = Math.min(...ss.map((s) => s.lon)) - 1.1, lon1 = Math.max(...ss.map((s) => s.lon)) + 1.1;
+  let m0 = mercY(Math.min(...ss.map((s) => s.lat)) - 0.9), m1 = mercY(Math.max(...ss.map((s) => s.lat)) + 0.9);
+  const need = aspect * (lon1 - lon0) * RAD;
+  if (need > m1 - m0) { const extra = need - (m1 - m0); m0 -= extra / 2; m1 += extra / 2; }
+  else { const L = (m1 - m0) / aspect / RAD, c = (lon0 + lon1) / 2; lon0 = c - L / 2; lon1 = c + L / 2; }
+  const r = (v) => Math.round(v * 1000) / 1000;
+  return { lon0: r(lon0), lon1: r(lon1), lat0: r(latOfMerc(m0)), lat1: r(latOfMerc(m1)), region: region in DETAILS ? region : 'north' };
 }
 const f1 = (n) => +n.toFixed(1);
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -209,7 +245,9 @@ async function loadElevation(Z, EXTENT, onProgress) {
 }
 
 // Horn hillshade from the north-west over the style's hypsometric ramp
-async function engrave({ elev, W, H, n, x0, y0, x1, y1 }, style, onProgress) {
+async function engrave(data, style, onProgress) {
+  if (style.paint) return paint(data, style, onProgress);
+  const { elev, W, H, n, y0 } = data;
   const { ramp, tone } = style;
   const lut = new Float32Array(7000 * 3);
   for (let e = 0; e < 7000; e++) {
@@ -251,12 +289,113 @@ async function engrave({ elev, W, H, n, x0, y0, x1, y1 }, style, onProgress) {
     onProgress?.(0.9 * ((sy + hgt) / H));
     await new Promise((r) => setTimeout(r));           // keep the page responsive
   }
+  return finish(canvas, data, onProgress);
+}
+
+// Encode the relief canvas and report its geographic bounds
+async function finish(canvas, { n, x0, y0, x1, y1 }, onProgress, extra = {}) {
   const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
   const href = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
   onProgress?.(1);
   const lonOf = (x) => (x / n) * 360 - 180;
   const latOf = (y) => Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) / RAD;
-  return { href, lon0: lonOf(x0), lon1: lonOf(x1 + 1), lat0: latOf(y1 + 1), lat1: latOf(y0) };
+  return { href, lon0: lonOf(x0), lon1: lonOf(x1 + 1), lat0: latOf(y1 + 1), lat1: latOf(y0), ...extra };
+}
+
+// ---------- Painted relief (Pahari miniature) ----------
+// Flat colour bands from smoothed elevation, each outlined in a darker tone, with only
+// three steps of light (shadow, ground, highlight), the way a miniature paints its hills.
+// Also samples the terrain for the painted motifs (peaks, hills, trees) drawn on top.
+async function paint(data, style, onProgress) {
+  const { elev, W, H, n, x0, y0 } = data;
+  const { bands, outline } = style.paint;
+  // Smoothed elevation: block means, sampled bilinearly, so band edges flow like brushwork
+  const B = 6, gw = Math.ceil(W / B), gh = Math.ceil(H / B), grid = new Float32Array(gw * gh);
+  for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+    let sum = 0, cnt = 0;
+    for (let y = gy * B; y < Math.min(H, gy * B + B); y++) for (let x = gx * B; x < Math.min(W, gx * B + B); x++) { sum += Math.max(0, elev[y * W + x]); cnt++; }
+    grid[gy * gw + gx] = sum / cnt;
+  }
+  const smooth = (i, j) => {
+    const fx = Math.max(0, Math.min(gw - 1.001, i / B - 0.5)), fy = Math.max(0, Math.min(gh - 1.001, j / B - 0.5));
+    const ix = fx | 0, iy = fy | 0, tx = fx - ix, ty = fy - iy, o = iy * gw + ix;
+    return (grid[o] * (1 - tx) + grid[o + 1] * tx) * (1 - ty) + (grid[o + gw] * (1 - tx) + grid[o + gw + 1] * tx) * ty;
+  };
+  const bandOf = (e) => { let b = 0; while (b < bands.length - 1 && e >= bands[b + 1][0]) b++; return b; };
+
+  const az = 315 * RAD, alt = 40 * RAD, zf = 3.1;
+  const canvas = new OffscreenCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  const strip = 256;
+  for (let sy = 0; sy < H; sy += strip) {
+    const hgt = Math.min(strip, H - sy);
+    const img = new ImageData(W, hgt);
+    const o = img.data;
+    for (let jj = 0; jj < hgt; jj++) {
+      const j = Math.min(H - 2, Math.max(1, sy + jj));
+      const lat = Math.atan(Math.sinh(Math.PI * (1 - (2 * (y0 + j / 256)) / n))) / RAD;
+      const cell = (40075016 * Math.cos(lat * RAD)) / (256 * n);
+      let bRight = bandOf(smooth(1, j));
+      for (let i = 1; i < W - 1; i++) {
+        const at = (dx, dy) => Math.max(0, elev[(j + dy) * W + i + dx]);
+        const a = at(-1, -1), b = at(0, -1), c = at(1, -1), d = at(-1, 0), f = at(1, 0), g = at(-1, 1), h = at(0, 1), k9 = at(1, 1);
+        const dzdx = ((c + 2 * f + k9) - (a + 2 * d + g)) / (8 * cell);
+        const dzdy = ((g + 2 * h + k9) - (a + 2 * b + c)) / (8 * cell);
+        const slope = Math.atan(zf * Math.hypot(dzdx, dzdy));
+        const aspect = Math.atan2(dzdy, -dzdx);
+        const hs = Math.cos(alt) * Math.cos(slope) + Math.sin(alt) * Math.sin(slope) * Math.cos(az - Math.PI / 2 - aspect);
+        const band = bRight;
+        bRight = bandOf(smooth(i + 1, j));
+        const edge = band !== bRight || band !== bandOf(smooth(i, j + 1)) || band !== bandOf(smooth(i, j + 2));
+        const col = bands[band][1];
+        const s = edge ? outline : hs < 0.6 ? 0.86 : hs > 0.9 ? 1.07 : 1;
+        const p = (jj * W + i) * 4;
+        o[p] = clamp(col[0] * s); o[p + 1] = clamp(col[1] * s); o[p + 2] = clamp(col[2] * s);
+        o[p + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, sy);
+    onProgress?.(0.9 * ((sy + hgt) / H));
+    await new Promise((r) => setTimeout(r));
+  }
+  return finish(canvas, data, onProgress, { motifs: motifs(data, smooth) });
+}
+
+// Sample the land on a staggered 0.42° grid: rugged high ground → painted peaks,
+// rugged middle ground → rounded hills, gentle low ground → trees (fewer in the dry north-west)
+function motifs({ elev, W, H, n, x0, y0 }, smooth) {
+  const out = [], step = 0.42;
+  const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+  const toPx = (lon, lat) => [((lon + 180) / 360) * n * 256 - x0 * 256, ((1 - mercY(lat) / Math.PI) / 2) * n * 256 - y0 * 256];
+  const lonOf = (x) => ((x / 256 + x0) / n) * 360 - 180, latOf = (y) => Math.atan(Math.sinh(Math.PI * (1 - (2 * (y / 256 + y0)) / n))) / RAD;
+  const lonA = lonOf(0), lonB = lonOf(W), latA = latOf(H), latB = latOf(0);
+  let row = 0;
+  for (let lat = latA + step / 2; lat < latB; lat += step * 0.87, row++) {
+    let col = 0;
+    for (let lon = lonA + step / 2 + (row % 2) * step / 2; lon < lonB; lon += step, col++) {
+      const r1 = hash(row, col), r2 = hash(col + 999, row), r3 = hash(row + 77, col + 31);
+      const jl = lon + (r1 - 0.5) * step * 0.6, jt = lat + (r2 - 0.5) * step * 0.5;
+      const [cx, cy] = toPx(jl, jt), half = Math.max(2, Math.round(((step / 360) * n * 256) / 2));
+      if (cx < half || cy < half || cx >= W - half || cy >= H - half) continue;
+      let lo = Infinity, hi = -Infinity, sea = 0, cnt = 0;
+      for (let y = cy - half; y < cy + half; y += 2) for (let x = cx - half; x < cx + half; x += 2) {
+        const e = elev[(y | 0) * W + (x | 0)]; cnt++;
+        if (e <= 0) sea++;
+        if (e < lo) lo = e; if (e > hi) hi = e;
+      }
+      if (sea / cnt > 0.08) continue;                       // keep motifs off the coasts
+      const e = smooth(cx, cy), relief = hi - lo;
+      // Thinned so the glyphs (wider than a cell) overlap in loose rows rather than a solid mass
+      if (e > 1800 && relief > 1300) { if (r3 < clamp((relief - 1300) / 2600, 0.3, 0.85)) out.push({ t: 'peak', lon: jl, lat: jt, e, s: 0.8 + 0.45 * Math.min(1, (hi - 1800) / 5000) + 0.4 * r3 }); }
+      else if (e > 250 && e < 3000 && relief > 380) { if (r3 < 0.42) out.push({ t: 'hill', lon: jl, lat: jt, e, s: 0.75 + 0.6 * r3 }); }
+      else if (e >= 3000) continue;                          // open plateau: leave it painted, unadorned
+      else if (e < 1500 && relief < 900) {
+        const dry = jl < 76 && jt > 23 ? 0.1 : 0.4;          // Thar and the dry north-west
+        if (r3 < dry) out.push({ t: r1 < 0.28 ? 'cypress' : 'tree', lon: jl, lat: jt, e, s: 0.8 + 0.4 * r2 });
+      }
+    }
+  }
+  return out;
 }
 
 // ---------- Text measurement ----------
@@ -277,7 +416,8 @@ export let lastNamed = null;
 export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 'classic', EXT = EXTENT, styleKey = 'antique') {
   const S = STYLES[styleKey] || STYLES.antique, FX = S.fx;
   Object.assign(C, S.C);
-  const MAPL = layout === 'map';
+  const DETAIL = layout === 'detail';
+  const MAPL = layout === 'map' || DETAIL;
   const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100);
   const k = W / 1800;                        // geometric scale vs. the 18 in design
   const ts = k;                              // everything scales with the sheet: same content at every size
@@ -337,13 +477,28 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
   const obstacles = [[F.x - 1e4, F.y - 1e4, F.x + F.w + 1e4, F.y + 4], [F.x - 1e4, bottom - 4, F.x + F.w + 1e4, bottom + 1e4],
     [F.x - 1e4, F.y, F.x + 4, bottom], [F.x + F.w - 4, F.y, F.x + F.w + 1e4, bottom]];
   const kx = px(84.3), ky = py(17.6), kw = px(97.1) - kx, kh = py(5.75) - ky;
-  const k500 = 500 * unitsPerKm(20);
+  // Scale bar: 500 km on the whole-route sheets; on a detail sheet the longest round length that fits
+  const latMid = DETAIL ? (EXT.lat0 + EXT.lat1) / 2 : 20;
+  const SK = DETAIL ? [500, 250, 200, 100, 50].find((v) => v * unitsPerKm(latMid) <= fs(330)) || 50 : 500;
+  const k500 = SK * unitsPerKm(latMid);
   // Map layout: title cartouche in the open sea at lower left, compass rose above it
   const cart = { w: Math.max(fs(560), textWidth('Van Vicharan', `${face.weight} $px ${face.family}`, fs(100 * face.scale)) + fs(90)), h: fs(372) };
   cart.x = F.x + fs(40); cart.y = F.y + F.h - fs(40) - cart.h;
   const roseR = 92 * ts;
   // Map layout: rose out in the open Indian Ocean, clear of the crowded southern tip
-  const rcx = MAPL ? px(89.4) : px(69.6), rcy = MAPL ? Math.min(py(2.4), F.y + F.h - roseR * 1.6) : py(13.4);
+  let rcx = MAPL ? px(89.4) : px(69.6), rcy = MAPL ? Math.min(py(2.4), F.y + F.h - roseR * 1.6) : py(13.4);
+  if (DETAIL) {
+    // Detail: put the cartouche, then the rose, in whichever corners cover the fewest stops and route
+    const busy = (x0, y0, x1, y1) => discs.filter((d) => d.x > x0 && d.x < x1 && d.y > y0 && d.y < y1).length * 40 +
+      ROUTE.filter(([lo, la]) => { const x = px(lo), y = py(la); return x > x0 && x < x1 && y > y0 && y < y1; }).length;
+    const m = fs(40), corners = [[F.x + m, F.y + F.h - m - cart.h], [F.x + F.w - m - cart.w, F.y + F.h - m - cart.h], [F.x + m, F.y + m + fs(30)], [F.x + F.w - m - cart.w, F.y + m + fs(30)]];
+    const score = corners.map(([x, y]) => busy(x, y, x + cart.w, y + cart.h));
+    const best = score.indexOf(Math.min(...score));
+    [cart.x, cart.y] = corners[best];
+    const rr = roseR * 1.5, rc = [[F.x + rr, F.y + F.h - rr], [F.x + F.w - rr, F.y + F.h - rr], [F.x + rr, F.y + rr * 1.2], [F.x + F.w - rr, F.y + rr * 1.2]];
+    const rs = rc.map(([x, y], i) => (i === best ? Infinity : busy(x - roseR, y - roseR * 1.3, x + roseR, y + roseR)));
+    [rcx, rcy] = rc[rs.indexOf(Math.min(...rs))];
+  }
   const sx = MAPL ? cart.x + (cart.w - k500) / 2 : px(67.6), sy = MAPL ? cart.y + cart.h - fs(86) : py(9.1);
   if (MAPL) obstacles.push([cart.x - 8, cart.y - 8, cart.x + cart.w + 8, cart.y + cart.h + 8]);
   else {
@@ -484,8 +639,8 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
   // --- scale bar ---
   let scale = '';
   for (let i = 0; i < 5; i++) scale += `<rect x="${f1(sx + (i * k500) / 5)}" y="${f1(sy)}" width="${f1(k500 / 5)}" height="${f1(7 * ts)}" fill="${i % 2 ? C.key : C.ink}" stroke="${C.ink}" stroke-width="${f1(0.8 * ts)}"/>`;
-  scale += [0, 250, 500].map((v) => `<text class="deg" x="${f1(sx + (v / 500) * k500)}" y="${f1(sy - fs(7))}" style="font-size:${fs(15)}px">${v}</text>`).join('');
-  scale += `<text class="scale-t" x="${f1(sx + k500 / 2)}" y="${f1(sy + fs(30))}" style="font-size:${fs(16)}px">Kilometres (at 20° N)</text>`;
+  scale += [0, SK / 2, SK].map((v) => `<text class="deg" x="${f1(sx + (v / SK) * k500)}" y="${f1(sy - fs(7))}" style="font-size:${fs(15)}px">${v}</text>`).join('');
+  scale += `<text class="scale-t" x="${f1(sx + k500 / 2)}" y="${f1(sy + fs(30))}" style="font-size:${fs(16)}px">Kilometres (at ${Math.round(latMid)}° N)</text>`;
 
   // --- graticule + water-lining ---
   let grat = '';
@@ -505,16 +660,76 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
     const yT = cart.y + fs(54), yTitle = yT + fs(92 * Math.min(1.08, face.scale)), ySub = yTitle + fs(44), yFacts = ySub + fs(40);
     cartouche = `<rect x="${f1(cart.x)}" y="${f1(cart.y)}" width="${f1(cart.w)}" height="${f1(cart.h)}" fill="${C.key}" fill-opacity="0.96" stroke="${C.ink}" stroke-width="${f1(1.6 * ts)}"/>
       <rect x="${f1(cart.x + 7 * ts)}" y="${f1(cart.y + 7 * ts)}" width="${f1(cart.w - 14 * ts)}" height="${f1(cart.h - 14 * ts)}" fill="none" stroke="${C.ink}" stroke-width="${f1(0.6 * ts)}"/>
-      <text class="eyebrow" x="${f1(cx)}" y="${f1(yT)}" style="font-size:${fs(19)}px;letter-spacing:${fs(8)}px">A Chart of the Pilgrimage called</text>
+      <text class="eyebrow" x="${f1(cx)}" y="${f1(yT)}" style="font-size:${fs(19)}px;letter-spacing:${fs(8)}px">A chart of Shri Nilkanth Varni’s</text>
       <text class="title" x="${f1(cx)}" y="${f1(yTitle)}" style="font-size:${fs(100 * face.scale)}px;letter-spacing:${f1(face.track * ts)}px">Van Vicharan</text>
-      <text class="subtitle" x="${f1(cx)}" y="${f1(ySub)}" style="font-size:${fs(25)}px">The forest journey of Nilkanth Varni</text>
+      <text class="subtitle" x="${f1(cx)}" y="${f1(ySub)}" style="font-size:${fs(25)}px">${DETAIL ? esc(DETAILS[EXT.region].title) : 'The journey of Nilkanth Varni'}</text>
       ${ornamentRule(cx, ySub + fs(18), fs(150), ts)}
-      <text class="facts" x="${f1(cx)}" y="${f1(yFacts)}" style="font-size:${fs(17)}px;letter-spacing:${fs(4)}px">Ayodhya to Loj · 1792 – 1799</text>
+      <text class="facts" x="${f1(cx)}" y="${f1(yFacts)}" style="font-size:${fs(17)}px;letter-spacing:${fs(4)}px">${DETAIL ? detailFacts(EXT.region) : 'Ayodhya to Loj · 1792 – 1799'}</text>
       <text class="credit" x="${f1(cx)}" y="${f1(cart.y + cart.h - fs(22))}" text-anchor="middle" style="font-size:${fs(11)}px">Relief: Mapzen Terrain Tiles · Coastlines: Natural Earth · Tirth positions approximate</text>`;
   }
   const rel = rel_(reliefData, px, py);
+  const motifSvg = FX.motifs ? paintMotifs(reliefData.motifs || [], px, py, ts, discs, R, [...obstacles, ...placed]) : '';
   const titleSize = fs(150 * face.scale);
 
+  return `${sheetOpen(fmt, W, H, k, ts, fs, face, FX, `<clipPath id="frame"><rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}"/></clipPath>
+    <clipPath id="land"><path d="${land}"/></clipPath>`)}
+
+  ${MAPL ? '' : `<text class="eyebrow" x="${midX}" y="${f1(yEyebrow)}" style="font-size:${fs(30)}px;letter-spacing:${fs(14)}px">A chart of Shri Nilkanth Varni’s</text>
+  <text class="title" x="${midX}" y="${f1(yTitle)}" style="font-size:${titleSize}px;letter-spacing:${f1(face.track * ts)}px">Van Vicharan</text>
+  <text class="subtitle" x="${midX}" y="${f1(ySub)}" style="font-size:${fs(38)}px">The journey of Nilkanth Varni</text>
+  ${ornamentRule(midX, yRule, fs(330), ts)}
+  <text class="facts" x="${midX}" y="${f1(yFacts)}" style="font-size:${fs(25)}px;letter-spacing:${fs(5)}px">1792 · sixty-five tirths · seven years, one month &amp; eleven days · 1799</text>`}
+
+  <g clip-path="url(#frame)">
+    <rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}" fill="${C.sea}"/>
+    ${FX.waves ? `<rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}" fill="url(#waves)"/>` : ''}
+    ${waterLines}
+    <g clip-path="url(#land)">
+      <image href="${rel.href}" x="${f1(rel.x)}" y="${f1(rel.y)}" width="${f1(rel.w)}" height="${f1(rel.h)}" preserveAspectRatio="none"/>
+      ${FX.wash ? `<rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}" filter="url(#pigment)" opacity="0.55"/>
+      <path d="${land}" fill="none" stroke="${C.ink3}" stroke-width="${f1(16 * k)}" stroke-opacity="0.32" filter="url(#bleed)"/>` : ''}
+    </g>
+    <path d="${grat}" fill="none" stroke="${C.ink}" stroke-opacity="${FX.grat}" stroke-width="${f1(0.8 * k)}"/>
+    <path d="${rivers}" fill="none" stroke="${C.water}" stroke-width="${f1(1.5 * k)}" stroke-opacity="0.9" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="${land}" fill="none" stroke="${C.ink}" stroke-width="${f1(1.6 * k)}" stroke-linejoin="round"/>
+    ${motifSvg}
+    ${areas}
+    ${FX.glow ? `<path d="${routeD}" fill="none" stroke="${C.red}" stroke-width="${f1(16 * ts)}" stroke-opacity="0.5" stroke-linejoin="round" filter="url(#glow)"/>` : ''}
+    <path d="${routeD}" fill="none" stroke="${C.paper}" stroke-width="${f1(8 * ts)}" stroke-linejoin="round" stroke-opacity="0.92"/>
+    <path d="${routeD}" fill="none" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}" stroke-linejoin="round"/>
+    ${marks}
+    ${names}
+    ${annots}
+    ${compassRose(rcx, rcy, roseR, ts)}
+    ${cartouche}
+    ${scale}
+    ${MAPL ? '' : key}
+  </g>
+  ${FX.frame === 'miniature' ? miniatureNeatline(F, k) : neatline(F, px, py, k, fs, EXT)}
+
+  ${MAPL ? '' : `<g transform="translate(${f1(F.x)}, ${f1(yLegend)})">
+    <line x1="0" y1="0" x2="${fs(56)}" y2="0" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}"/>
+    <text class="legend" x="${fs(68)}" y="${fs(6)}" style="font-size:${fs(19)}px">The route as charted</text>
+    <circle cx="${fs(340)}" cy="0" r="${f1(R)}" fill="${C.key}" stroke="${C.ink}" stroke-width="${f1(1.4 * ts)}"/><text class="num" x="${fs(340)}" y="${f1(R * 0.36)}" style="font-size:${fs(12.5)}px">7</text>
+    <text class="legend" x="${fs(362)}" y="${fs(6)}" style="font-size:${fs(19)}px">Tirth, numbered as in the key</text>
+    <circle cx="${fs(700)}" cy="0" r="${f1(R)}" fill="${C.red}" stroke="${C.ink}" stroke-width="${f1(1.4 * ts)}"/><text class="num end" x="${fs(700)}" y="${f1(R * 0.36)}" style="font-size:${fs(12.5)}px">1</text>
+    <text class="legend" x="${fs(722)}" y="${fs(6)}" style="font-size:${fs(19)}px">Beginning &amp; end of the journey</text>
+  </g>
+  <text class="colophon" x="${midX}" y="${f1(yColophon)}" style="font-size:${fs(21)}px">Departed Ayodhya on Ashadh sud 10, Samvat 1849 · Arrived at Loj on Shravan vad 6, Samvat 1856</text>
+  ${chronicle(F.x, yColophon + fs(36), F.w, chronH - fs(20), fs, ts)}
+  <text class="credit" x="${f1(F.x)}" y="${f1(yCredit)}" style="font-size:${fs(13.5)}px">Relief engraved from Mapzen Terrain Tiles · Coastlines &amp; rivers: Natural Earth · Positions of tirths are approximate</text>
+  <text class="credit" x="${f1(F.x + F.w)}" y="${f1(yCredit)}" text-anchor="end" style="font-size:${fs(13.5)}px">${esc(fmt.label)} · Mercator projection · Drawn ${new Date().getFullYear()}</text>`}
+
+  ${sheetClose(W, H, FX)}`;
+}
+
+// [r, g, b, alpha, offset] → feColorMatrix that tints noise one colour
+const tint = ([r, g, b, a, o]) => `0 0 0 0 ${r}  0 0 0 0 ${g}  0 0 0 0 ${b}  0 0 0 ${a} ${o}`;
+
+
+// ---------- Sheet shell shared by every layout and view ----------
+// Opens the SVG: shared filters + type styles, paper, mottle and the border (unless opts.border is false)
+export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts = {}) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${fmt.w}in" height="${fmt.h}in" id="chart">
   <defs>
     <filter id="grain" x="0" y="0" width="100%" height="100%">
@@ -534,9 +749,9 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
       <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.42  0 0 0 0 0.34  0 0 0 0 0.4  0 0 0 0.75 -0.3"/>
     </filter>
     <filter id="bleed" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${f1(6 * k)}"/></filter>
+    ${FX.waves ? wavePattern(k) : ''}
     <filter id="glow" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${f1(7 * ts)}"/></filter>
-    <clipPath id="frame"><rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}"/></clipPath>
-    <clipPath id="land"><path d="${land}"/></clipPath>
+    ${extraDefs}
     <style>
       text { font-family: 'IM Fell English', Georgia, serif; fill: ${C.ink}; }
       .eyebrow, .facts, .range, .region, .key-title, .rose-n, .chron-h, .chron-r { font-family: 'IM Fell English SC', 'IM Fell English', Georgia, serif; }
@@ -571,60 +786,20 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
 
   <rect width="${W}" height="${H}" fill="${C.paper}"/>
   ${FX.mottle ? `<rect width="${W}" height="${H}" filter="url(#mottle)"/>` : ''}
-
-  ${border(W, H, k)}
-
-  ${MAPL ? '' : `<text class="eyebrow" x="${midX}" y="${f1(yEyebrow)}" style="font-size:${fs(30)}px;letter-spacing:${fs(14)}px">A Chart of the Pilgrimage called</text>
-  <text class="title" x="${midX}" y="${f1(yTitle)}" style="font-size:${titleSize}px;letter-spacing:${f1(face.track * ts)}px">Van Vicharan</text>
-  <text class="subtitle" x="${midX}" y="${f1(ySub)}" style="font-size:${fs(38)}px">The forest journey of Nilkanth Varni, from Ayodhya to Loj</text>
-  ${ornamentRule(midX, yRule, fs(330), ts)}
-  <text class="facts" x="${midX}" y="${f1(yFacts)}" style="font-size:${fs(25)}px;letter-spacing:${fs(5)}px">1792 · sixty-five tirths · seven years, one month &amp; eleven days · 1799</text>`}
-
-  <g clip-path="url(#frame)">
-    <rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}" fill="${C.sea}"/>
-    ${waterLines}
-    <g clip-path="url(#land)">
-      <image href="${rel.href}" x="${f1(rel.x)}" y="${f1(rel.y)}" width="${f1(rel.w)}" height="${f1(rel.h)}" preserveAspectRatio="none"/>
-      ${FX.wash ? `<rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}" filter="url(#pigment)" opacity="0.55"/>
-      <path d="${land}" fill="none" stroke="${C.ink3}" stroke-width="${f1(16 * k)}" stroke-opacity="0.32" filter="url(#bleed)"/>` : ''}
-    </g>
-    <path d="${grat}" fill="none" stroke="${C.ink}" stroke-opacity="${FX.grat}" stroke-width="${f1(0.8 * k)}"/>
-    <path d="${rivers}" fill="none" stroke="${C.water}" stroke-width="${f1(1.5 * k)}" stroke-opacity="0.9" stroke-linejoin="round" stroke-linecap="round"/>
-    <path d="${land}" fill="none" stroke="${C.ink}" stroke-width="${f1(1.6 * k)}" stroke-linejoin="round"/>
-    ${areas}
-    ${FX.glow ? `<path d="${routeD}" fill="none" stroke="${C.red}" stroke-width="${f1(16 * ts)}" stroke-opacity="0.5" stroke-linejoin="round" filter="url(#glow)"/>` : ''}
-    <path d="${routeD}" fill="none" stroke="${C.paper}" stroke-width="${f1(8 * ts)}" stroke-linejoin="round" stroke-opacity="0.92"/>
-    <path d="${routeD}" fill="none" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}" stroke-linejoin="round"/>
-    ${marks}
-    ${names}
-    ${annots}
-    ${compassRose(rcx, rcy, roseR, ts)}
-    ${cartouche}
-    ${scale}
-    ${MAPL ? '' : key}
-  </g>
-  ${neatline(F, px, py, k, fs, EXT)}
-
-  ${MAPL ? '' : `<g transform="translate(${f1(F.x)}, ${f1(yLegend)})">
-    <line x1="0" y1="0" x2="${fs(56)}" y2="0" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}"/>
-    <text class="legend" x="${fs(68)}" y="${fs(6)}" style="font-size:${fs(19)}px">The route as charted</text>
-    <circle cx="${fs(340)}" cy="0" r="${f1(R)}" fill="${C.key}" stroke="${C.ink}" stroke-width="${f1(1.4 * ts)}"/><text class="num" x="${fs(340)}" y="${f1(R * 0.36)}" style="font-size:${fs(12.5)}px">7</text>
-    <text class="legend" x="${fs(362)}" y="${fs(6)}" style="font-size:${fs(19)}px">Tirth, numbered as in the key</text>
-    <circle cx="${fs(700)}" cy="0" r="${f1(R)}" fill="${C.red}" stroke="${C.ink}" stroke-width="${f1(1.4 * ts)}"/><text class="num end" x="${fs(700)}" y="${f1(R * 0.36)}" style="font-size:${fs(12.5)}px">1</text>
-    <text class="legend" x="${fs(722)}" y="${fs(6)}" style="font-size:${fs(19)}px">Beginning &amp; end of the journey</text>
-  </g>
-  <text class="colophon" x="${midX}" y="${f1(yColophon)}" style="font-size:${fs(21)}px">Departed Ayodhya on Ashadh sud 10, Samvat 1849 · Arrived at Loj on Shravan vad 6, Samvat 1856</text>
-  ${chronicle(F.x, yColophon + fs(36), F.w, chronH - fs(20), fs, ts)}
-  <text class="credit" x="${f1(F.x)}" y="${f1(yCredit)}" style="font-size:${fs(13.5)}px">Relief engraved from Mapzen Terrain Tiles · Coastlines &amp; rivers: Natural Earth · Positions of tirths are approximate</text>
-  <text class="credit" x="${f1(F.x + F.w)}" y="${f1(yCredit)}" text-anchor="end" style="font-size:${fs(13.5)}px">${esc(fmt.label)} · Mercator projection · Drawn ${new Date().getFullYear()}</text>`}
-
-  ${FX.vignette ? `<rect width="${W}" height="${H}" fill="url(#vignette)" pointer-events="none"/>` : ''}
+  ${opts.border === false ? '' : FX.frame === 'miniature' ? miniatureBorder(W, H, k) : border(W, H, k)}
+`;
+}
+export function sheetClose(W, H, FX) {
+  return `${FX.vignette ? `<rect width="${W}" height="${H}" fill="url(#vignette)" pointer-events="none"/>` : ''}
   <rect width="${W}" height="${H}" filter="url(#grain)" opacity="${FX.grainOpacity}" pointer-events="none"/>
 </svg>`;
 }
 
-// [r, g, b, alpha, offset] → feColorMatrix that tints noise one colour
-const tint = ([r, g, b, a, o]) => `0 0 0 0 ${r}  0 0 0 0 ${g}  0 0 0 0 ${b}  0 0 0 ${a} ${o}`;
+// "Tirths 1 – 18 · 1792 – 1795" for a detail cartouche
+function detailFacts(region) {
+  const D = DETAILS[region], y0 = CHRONO[D.from - 1].date.getUTCFullYear(), y1 = CHRONO[D.to - 1].date.getUTCFullYear();
+  return `Tirths ${D.from} – ${D.to} · ${y0 === y1 ? y0 : `${y0} – ${y1}`}`;
+}
 
 // relief image placement in this sheet's map units
 function rel_(rel, px, py) {
@@ -653,6 +828,72 @@ function border(W, H, k) {
     g += `<polygon points="${f1(x)},${f1(y - c * 0.36)} ${f1(x + c * 0.36)},${f1(y)} ${f1(x)},${f1(y + c * 0.36)} ${f1(x - c * 0.36)},${f1(y)}" fill="${C.red}"/>`;
   }
   return g;
+}
+
+// Pahari page: gold-flecked pink margin (hashiya), white-edged lapis band, red inner rule
+function miniatureBorder(W, H, k) {
+  const o = 44 * k, band = 12 * k;
+  let g = `<path d="M0,0H${W}V${H}H0Z M${f1(o)},${f1(o)}V${f1(H - o)}H${f1(W - o)}V${f1(o)}Z" fill="${C.margin}" fill-rule="evenodd"/>`;
+  let flecks = '', seed = 1;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 900; i++) {
+    const side = i % 4, t = rnd(), d = rnd() * (o - band) * 0.9;
+    const [x, y] = side === 0 ? [t * W, d] : side === 1 ? [t * W, H - d] : side === 2 ? [d, t * H] : [W - d, t * H];
+    flecks += `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1((0.6 + rnd() * 1.4) * k)}"/>`;
+  }
+  g += `<g fill="${C.gold}" opacity="0.8">${flecks}</g>`;
+  const r = (inset, stroke, w) => `<rect x="${f1(inset)}" y="${f1(inset)}" width="${f1(W - 2 * inset)}" height="${f1(H - 2 * inset)}" fill="none" stroke="${stroke}" stroke-width="${f1(w)}"/>`;
+  g += r(o - band / 2, C.lapis, band) + r(o - band - 1.2 * k, '#f8f1e2', 1.6 * k) + r(o + 1.2 * k, '#f8f1e2', 1.6 * k) + r(o + 6 * k, C.red, 2.4 * k);
+  return g;
+}
+function miniatureNeatline(F, k) {
+  const { x, y, w, h } = F, t = 7 * k;
+  return `<rect x="${f1(x - t)}" y="${f1(y - t)}" width="${f1(w + 2 * t)}" height="${f1(h + 2 * t)}" fill="none" stroke="${C.lapis}" stroke-width="${f1(5 * k)}"/>
+  <rect x="${f1(x)}" y="${f1(y)}" width="${f1(w)}" height="${f1(h)}" fill="none" stroke="${C.red}" stroke-width="${f1(1.6 * k)}"/>`;
+}
+// Water as miniatures paint it: rows of small scalloped ripples
+function wavePattern(k) {
+  const w = 34 * k, h = 20 * k, a = w / 4;
+  const row = (y, dx) => `M${f1(dx - a)},${f1(y)} q${f1(a)},${f1(-a * 0.8)} ${f1(2 * a)},0 M${f1(dx + a)},${f1(y)} q${f1(a)},${f1(-a * 0.8)} ${f1(2 * a)},0 M${f1(dx + 3 * a)},${f1(y)} q${f1(a)},${f1(-a * 0.8)} ${f1(2 * a)},0`;
+  return `<pattern id="waves" width="${f1(w)}" height="${f1(h)}" patternUnits="userSpaceOnUse">
+    <path d="${row(h * 0.45, 0)} ${row(h * 0.95, a)}" fill="none" stroke="${C.wave}" stroke-opacity="0.5" stroke-width="${f1(1.1 * k)}" stroke-linecap="round"/></pattern>`;
+}
+// Painted motifs, drawn back to front, kept clear of the route, stops and furniture
+function paintMotifs(list, px, py, ts, discs, R, obstacles) {
+  const pts = ROUTE.map(([lo, la]) => [px(lo), py(la)]);
+  const clearR = 14 * ts, stopR = R * 2.4;
+  const items = list.map((m) => ({ ...m, x: px(m.lon), y: py(m.lat) })).filter((m) => {
+    const hw = 22 * ts * m.s;
+    if (obstacles.some((b) => m.x + hw > b[0] && m.x - hw < b[2] && m.y > b[1] && m.y - hw * 1.6 < b[3])) return false;
+    if (discs.some((d) => Math.hypot(d.x - m.x, d.y - m.y) < stopR)) return false;
+    for (const [x, y] of pts) if (Math.abs(x - m.x) < clearR && Math.abs(y - m.y) < clearR) return false;
+    return true;
+  }).sort((a, b) => a.y - b.y);
+  const L = (n) => f1(n);
+  let g = '';
+  for (const m of items) {
+    const { x, y } = m, sw = L(0.9 * ts);
+    if (m.t === 'peak') {
+      const s = 14 * ts * m.s, snow = m.e > 4200 || m.s > 1.25;
+      g += `<path d="M${L(x - s)},${L(y)} C${L(x - s * 0.55)},${L(y - s * 0.5)} ${L(x - s * 0.32)},${L(y - s * 1.25)} ${L(x)},${L(y - s * 1.3)} C${L(x + s * 0.32)},${L(y - s * 1.25)} ${L(x + s * 0.55)},${L(y - s * 0.5)} ${L(x + s)},${L(y)} Z" fill="${snow ? '#c9b8b2' : '#b59670'}" stroke="${C.ink3}" stroke-width="${sw}"/>`;
+      g += `<path d="M${L(x)},${L(y - s * 1.3)} C${L(x + s * 0.32)},${L(y - s * 1.25)} ${L(x + s * 0.55)},${L(y - s * 0.5)} ${L(x + s)},${L(y)} L${L(x + s * 0.1)},${L(y)} C${L(x + s * 0.25)},${L(y - s * 0.5)} ${L(x + s * 0.1)},${L(y - s)} ${L(x)},${L(y - s * 1.3)} Z" fill="${C.ink3}" fill-opacity="0.28"/>`;
+      if (snow) g += `<path d="M${L(x - s * 0.36)},${L(y - s * 0.95)} C${L(x - s * 0.24)},${L(y - s * 1.22)} ${L(x + s * 0.24)},${L(y - s * 1.22)} ${L(x + s * 0.36)},${L(y - s * 0.95)} Q${L(x + s * 0.12)},${L(y - s * 0.82)} ${L(x)},${L(y - s * 0.98)} Q${L(x - s * 0.12)},${L(y - s * 0.82)} ${L(x - s * 0.36)},${L(y - s * 0.95)} Z" fill="#fbf7ee" stroke="${C.ink3}" stroke-width="${L(0.5 * ts)}"/>`;
+    } else if (m.t === 'hill') {
+      const s = 11 * ts * m.s;
+      g += `<path d="M${L(x - s)},${L(y)} C${L(x - s * 0.7)},${L(y - s * 0.9)} ${L(x + s * 0.7)},${L(y - s * 0.9)} ${L(x + s)},${L(y)} Z" fill="#93a35c" stroke="${C.ink3}" stroke-width="${sw}"/>`;
+      g += `<path d="M${L(x - s * 0.45)},${L(y - s * 0.42)} q${L(s * 0.2)},${L(-s * 0.2)} ${L(s * 0.4)},${L(-s * 0.22)}" fill="none" stroke="#c9d08e" stroke-width="${L(1.2 * ts)}" stroke-linecap="round"/>`;
+    } else if (m.t === 'cypress') {
+      const s = 9 * ts * m.s;
+      g += `<line x1="${L(x)}" y1="${L(y)}" x2="${L(x)}" y2="${L(y - s * 0.5)}" stroke="#5a3b22" stroke-width="${L(1.2 * ts)}"/>`;
+      g += `<path d="M${L(x)},${L(y - s * 2.6)} C${L(x + s * 0.65)},${L(y - s * 1.8)} ${L(x + s * 0.5)},${L(y - s * 0.6)} ${L(x)},${L(y - s * 0.45)} C${L(x - s * 0.5)},${L(y - s * 0.6)} ${L(x - s * 0.65)},${L(y - s * 1.8)} ${L(x)},${L(y - s * 2.6)} Z" fill="#3f5a2c" stroke="#2c3f1e" stroke-width="${L(0.6 * ts)}"/>`;
+    } else {
+      const s = 8 * ts * m.s;
+      g += `<line x1="${L(x)}" y1="${L(y)}" x2="${L(x)}" y2="${L(y - s * 0.9)}" stroke="#5a3b22" stroke-width="${L(1.4 * ts)}"/>`;
+      g += `<circle cx="${L(x)}" cy="${L(y - s * 1.55)}" r="${L(s * 0.9)}" fill="#4d6a32" stroke="#2c3f1e" stroke-width="${L(0.6 * ts)}"/>`;
+      g += `<circle cx="${L(x - s * 0.3)}" cy="${L(y - s * 1.85)}" r="${L(s * 0.32)}" fill="#7d9a4c"/>`;
+    }
+  }
+  return `<g class="motifs">${g}</g>`;
 }
 
 function compassRose(cx, cy, R, ts) {
@@ -765,3 +1006,37 @@ export async function embedFonts(svg) {
   }
   return svg.replace('<style>', `<style>${out}\n`);
 }
+
+// ---------- Shared with the other views (js/print-views.js) ----------
+// Point the drawing palette at a style and return it
+function useStyle(styleKey) {
+  const S = STYLES[styleKey] || STYLES.antique;
+  Object.assign(C, S.C);
+  return S;
+}
+// The colour a style paints ground of a given elevation (flat light), for profiles and keys
+function styleColor(S, e) {
+  if (S.paint) { const b = S.paint.bands; let i = 0; while (i < b.length - 1 && e >= b[i + 1][0]) i++; return b[i][1]; }
+  const r = S.ramp; let c = r[r.length - 1][1];
+  for (let i = 1; i < r.length; i++) if (e < r[i][0]) { const t = (e - r[i - 1][0]) / (r[i][0] - r[i - 1][0]); c = mixRGB(r[i - 1][1], r[i][1], t); break; }
+  return S.tone(c, 0.82, e).map((v) => clamp(Math.round(v)));
+}
+// Raw elevation grid for an extent (shares the relief's cache), and a bilinear sampler over it
+export function elevationData(Z, ext, onProgress) {
+  const key = `${Z}:${ext.lon0},${ext.lon1},${ext.lat0},${ext.lat1}`;
+  if (elevCache.key !== key) elevCache = { key, p: loadElevation(Z, ext, onProgress) };
+  return elevCache.p;
+}
+export function elevationSampler({ elev, W, H, n, x0, y0 }) {
+  return (lon, lat) => {
+    const gx = (((lon + 180) / 360) * n - x0) * 256, gy = (((1 - mercY(lat) / Math.PI) / 2) * n - y0) * 256;
+    if (gx < 0 || gy < 0 || gx >= W - 1 || gy >= H - 1) return 0;
+    const ix = gx | 0, iy = gy | 0, tx = gx - ix, ty = gy - iy, o = iy * W + ix;
+    return (elev[o] * (1 - tx) + elev[o + 1] * tx) * (1 - ty) + (elev[o + W] * (1 - tx) + elev[o + W + 1] * tx) * ty;
+  };
+}
+export const kit = {
+  C, STOPS, ROUTE, CHRONO, LEG_KM, LAND, RIVERS, EXTENT, RAD, mercY, latOfMerc, f1, esc, lerp, clamp, mixRGB,
+  textWidth, FELL, FELL_I, FELL_SC, boxHit, haversineKm, ornamentRule, compassRose, sheetOpen, sheetClose,
+  useStyle, styleColor, TITLE_FACES,
+};

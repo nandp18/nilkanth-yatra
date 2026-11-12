@@ -32,16 +32,22 @@ The middle dates are **estimates** (shown with ≈). They spread the seven years
 - compass rose and scale bar
 - the 65 tirths keyed in the Indian Ocean, as on the original map
 
-Five map styles, each a different tint of the same relief, palette and paper (`STYLES` in `js/print.js`; open one directly with `print.html?style=night`):
+Six map styles, each with its own relief, palette and paper (`STYLES` in `js/print.js`; open one directly with `print.html?style=night`):
 - **Antique** (default): the engraved sepia chart.
 - **Natural**: natural-colour shaded relief, after Tom Patterson's National Park Service maps.
 - **Watercolor**: soft pigment washes with pooled edges on cold-press paper, after Molly O'Halloran.
 - **Cyanotype**: everything in Prussian blue and paper white, after Daniel Huffman's sun-printed cyanotypes.
 - **Night**: moonlit relief and a glowing lantern route, after Anna Eshelman's Wonderland Trail map.
+- **Pahari**: painted like a Kangra/Pahari miniature. It has flat, outlined grounds, little snow-capped peaks, hillocks and trees placed from the real terrain, rippled water, and a lapis band on a gold-flecked pink margin.
 
-Two layouts:
+Seven layouts. Every one works in every style and at every size:
 - **Classic**: title block, map, numbered key, legend and a chronicle timeline.
 - **Map**: almost no text. The map fills the sheet, extended to its proportions (more sea to the south, more Tibet to the north), and a small title cartouche sits in the Arabian Sea corner. All 65 stops are named on the map, with leader lines where they crowd, and there's no key. Open it directly with `print.html?layout=map`.
+- **Detail**: one region at a large scale, with every stop named. Choose the region: Himalaya & Nepal (stops 1–18), East (19–29), South (30–51) or West (52–65), e.g. `print.html?layout=detail&region=south`. The cartouche and compass take the emptiest corners, the scale bar picks a round length that fits, and the relief is fetched at about 260 dpi or better.
+- **Strip**: a road-book after John Ogilby. The route is cut into twelve strips of about equal length, each turned to whichever angle fills it largest and read from the bottom up. Each strip has its own north arrow and scale.
+- **Profile**: the height of the ground along the route, unrolled in four rows. It shows every tirth, the new year as it passes, and the highest ground crossed. Heights use a stretched scale so the Deccan reads beside the Himalaya; the gridlines carry the true values.
+- **Panorama**: a bird's-eye view from above the Indian Ocean, looking north, ray-cast from the elevation data in the style's colours. Heights are exaggerated about 36×, and the route is dotted where it passes behind mountains. A key of all 65 tirths sits beneath.
+- **Line**: a minimal poster. It shows the route as one bold line, the coast as a hairline, the milestones in small capitals and a large quiet title.
 
 Formats are **12 × 16 in**, **18 × 24 in**, **24 × 36 in** and **A2**, plus an **8.5 × 11 in test** sheet that prints inside ¼ in margins on a home printer (`print.html?size=letter`). Every format carries the same content: the stops named on the 18 × 24 in reference sheet are named on all of them. Each one lays out separately:
 - Type is sized for viewing distance.
@@ -72,7 +78,8 @@ js/
   weather.js          weather overlay + live elevation sampling
   sky.js              night sky (astronomy, chart, 3D dome); loaded on demand
   chronology.js       estimated date for each stop
-  print.js            print edition renderer
+  print.js            print edition renderer: styles, relief, Classic / Map / Detail sheets
+  print-views.js      the other print views: Strip, Profile, Panorama, Line
   data/
     stops.js          the 65 tirths, cities, map labels
     skydata.js        generated: star catalog       (npm run build:sky)
