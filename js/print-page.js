@@ -1,5 +1,5 @@
 // Print edition page: format + title pickers, preview at relative physical size, export.
-import { FORMATS, TITLE_FACES, LAYOUTS, REFERENCE, extentFor, tileCount, relief, buildSheet, embedFonts } from './print.js';
+import { FORMATS, TITLE_FACES, LAYOUTS, STYLES, REFERENCE, extentFor, tileCount, relief, blankRelief, buildSheet, embedFonts } from './print.js';
 import * as printMod from './print.js';
 
 const $ = (id) => document.getElementById(id);
@@ -8,6 +8,7 @@ const state = {
   fmt: FORMATS[params.get('size')] ? params.get('size') : '18x24',
   face: 'didone',
   layout: LAYOUTS[params.get('layout')] ? params.get('layout') : 'classic',
+  style: STYLES[params.get('style')] ? params.get('style') : 'antique',
 };
 const pageStyle = document.createElement('style');
 document.head.appendChild(pageStyle);
@@ -48,7 +49,8 @@ async function render() {
   $('btn-print').disabled = $('btn-svg').disabled = true;
   document.body.classList.remove('ready');
   const ext = extentFor(f, state.layout);
-  const rel = await relief(zoomFor(f, ext), ext, (p) => { if (my === seq) $('status').textContent = `Engraving relief… ${Math.round(p * 100)}%`; });
+  $('sheet').style.background = STYLES[state.style].C.paper;
+  const rel = await relief(zoomFor(f, ext), ext, state.style, (p) => { if (my === seq) $('status').textContent = `Engraving relief… ${Math.round(p * 100)}%`; });
   await document.fonts.ready;
   if (my !== seq) return;
   // Classic: name exactly the stops that fit on the reference sheet, at every size.
@@ -56,11 +58,11 @@ async function render() {
   let names = null;
   if (state.layout === 'classic') {
     const refExt = extentFor(FORMATS[REFERENCE], 'classic');
-    buildSheet(FORMATS[REFERENCE], state.face, await relief(zoomFor(FORMATS[REFERENCE], refExt), refExt), null, 'classic', refExt);
+    buildSheet(FORMATS[REFERENCE], state.face, blankRelief(refExt), null, 'classic', refExt);   // layout pass only
     names = printMod.lastNamed;
   }
   if (my !== seq) return;
-  current = buildSheet(f, state.face, rel, names, state.layout, ext);
+  current = buildSheet(f, state.face, rel, names, state.layout, ext, state.style);
   $('sheet').innerHTML = current;
   $('status').textContent = 'Ready to print';
   $('btn-print').disabled = $('btn-svg').disabled = false;
@@ -76,12 +78,14 @@ function bindSeg(el, key, onPick) {
     };
   });
 }
+$('styles').innerHTML = '<span>Style</span>' + Object.entries(STYLES).map(([k, s]) => `<button data-v="${k}" class="${k === state.style ? 'on' : ''}" title="${s.note}"><i class="swatch" style="background:linear-gradient(135deg, ${s.C.paper} 50%, ${s.C.red} 50%)"></i>${s.label}</button>`).join('');
 $('sizes').innerHTML = '<span>Size</span>' + Object.entries(FORMATS).map(([k, f]) => `<button data-v="${k}" class="${k === state.fmt ? 'on' : ''}" title="${f.label}">${f.short}</button>`).join('');
 $('layouts').innerHTML = '<span>Layout</span>' + Object.entries(LAYOUTS).map(([k, l]) => `<button data-v="${k}" class="${k === state.layout ? 'on' : ''}">${l}</button>`).join('');
 $('faces').innerHTML = '<span>Title</span>' + Object.entries(TITLE_FACES).map(([k, f]) => `<button data-v="${k}" class="${k === state.face ? 'on' : ''}" style="font-family:${f.family}">${f.label}</button>`).join('');
 bindSeg($('sizes'), 'fmt', render);
 bindSeg($('faces'), 'face', render);
 bindSeg($('layouts'), 'layout', render);
+bindSeg($('styles'), 'style', render);
 $('layouts').title = 'Layout'; $('faces').title = 'Title typeface'; $('sizes').title = 'Sheet size';
 window.addEventListener('resize', sizePreview);
 
@@ -91,7 +95,7 @@ $('btn-svg').onclick = async () => {
   const svg = await embedFonts(current);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
-  a.download = `van-vicharan-${state.layout}-${state.fmt}.svg`;
+  a.download = `van-vicharan-${state.style}-${state.layout}-${state.fmt}.svg`;
   a.click();
   $('status').textContent = 'Ready to print';
 };

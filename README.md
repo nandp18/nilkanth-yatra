@@ -32,6 +32,13 @@ The middle dates are **estimates** (shown with ≈). They spread the seven years
 - compass rose and scale bar
 - the 65 tirths keyed in the Indian Ocean, as on the original map
 
+Five map styles, each a different tint of the same relief, palette and paper (`STYLES` in `js/print.js`; open one directly with `print.html?style=night`):
+- **Antique** (default): the engraved sepia chart.
+- **Natural**: natural-colour shaded relief, after Tom Patterson's National Park Service maps.
+- **Watercolor**: soft pigment washes with pooled edges on cold-press paper, after Molly O'Halloran.
+- **Cyanotype**: everything in Prussian blue and paper white, after Daniel Huffman's sun-printed cyanotypes.
+- **Night**: moonlit relief and a glowing lantern route, after Anna Eshelman's Wonderland Trail map.
+
 Two layouts:
 - **Classic**: title block, map, numbered key, legend and a chronicle timeline.
 - **Map**: almost no text. The map fills the sheet, extended to its proportions (more sea to the south, more Tibet to the north), and a small title cartouche sits in the Arabian Sea corner. All 65 stops are named on the map, with leader lines where they crowd, and there's no key. Open it directly with `print.html?layout=map`.

@@ -29,11 +29,68 @@ export const TITLE_FACES = {
   fell: { label: 'Fell', family: "'IM Fell English', Georgia, serif", weight: 400, scale: 1, track: 2 },
 };
 
-// Deeper, higher-contrast palette
-const C = {
-  ink: '#1c120a', ink2: '#3b2a1b', red: '#7a1c10', water: '#2c4a5a',
-  paper: '#ebdab0', sea: '#d6d6c0', seaLine: '#d6d6c0', key: '#efe1bb',
+// ---------- Map styles ----------
+// Each style sets the palette (C), how the relief is tinted (ramp: elevation in metres → RGB,
+// tone: ramp colour + hillshade → pixel) and the paper effects. hs is Lambertian hillshade
+// from the north-west: about 0.77 on flat ground, 0 in full shadow, 1 on slopes facing the light.
+// mottle/grain are [r, g, b, alpha, offset] tints for the turbulence filters.
+const clamp = (v, a = 0, b = 255) => Math.max(a, Math.min(b, v));
+const mixRGB = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+export const STYLES = {
+  antique: {
+    label: 'Antique', note: 'Engraved sepia chart, after the original printed map',
+    C: { ink: '#1c120a', ink2: '#3b2a1b', ink3: '#4b321c', ink4: '#54412e', red: '#7a1c10', water: '#2c4a5a',
+      paper: '#ebdab0', sea: '#d6d6c0', seaLine: '#d6d6c0', key: '#efe1bb' },
+    ramp: [[0, [232, 213, 166]], [250, [226, 203, 152]], [800, [212, 182, 130]], [1800, [192, 158, 112]],
+      [3200, [166, 138, 106]], [4600, [168, 154, 138]], [5600, [214, 206, 192]], [6600, [240, 236, 226]]],
+    tone: (c, hs) => { const s = Math.min(1.14, 0.3 + 0.88 * hs); return [c[0] * s, c[1] * s, c[2] * s * 0.96]; },
+    fx: { mottle: [0.42, 0.28, 0.12, 0.62, -0.2], grain: [0.3, 0.2, 0.1, 0.6, -0.14], grainOpacity: 0.45,
+      vignette: ['#5a3b16', 0.42], waterLines: 1, grat: 0.24 },
+  },
+  // Tom Patterson / US National Park Service: natural-colour relief, soft shading, clean paper
+  natural: {
+    label: 'Natural', note: 'Natural-colour shaded relief, after Tom Patterson’s Park Service maps',
+    C: { ink: '#25272b', ink2: '#474b52', ink3: '#5e4c3a', ink4: '#6b6660', red: '#c0352a', water: '#4a7c98',
+      paper: '#f6f3ec', sea: '#c6dce5', seaLine: '#c6dce5', key: '#fcfbf7' },
+    ramp: [[0, [160, 188, 134]], [200, [178, 198, 144]], [600, [202, 204, 158]], [1200, [214, 202, 162]],
+      [2200, [198, 176, 144]], [3500, [186, 166, 140]], [4800, [196, 180, 156]], [5500, [222, 218, 212]], [6000, [248, 248, 248]], [6600, [255, 255, 255]]],
+    tone: (c, hs) => { const s = Math.min(1.12, 0.58 + 0.56 * hs), cool = (1 - hs) * 14; return [c[0] * s - cool * 0.4, c[1] * s, c[2] * s + cool]; },
+    fx: { mottle: null, grain: [0.4, 0.4, 0.4, 0.3, -0.1], grainOpacity: 0.2, vignette: null, waterLines: 0.55, grat: 0.14 },
+  },
+  // Molly O'Halloran / Ekaterina Shchekina: soft pigment washes on cold-press paper
+  watercolor: {
+    label: 'Watercolor', note: 'Pigment washes on cold-press paper, after Molly O’Halloran',
+    C: { ink: '#2d3140', ink2: '#4a4f60', ink3: '#6a586c', ink4: '#6b6874', red: '#b4402e', water: '#5a8ea4',
+      paper: '#fbf7ee', sea: '#d2e5ea', seaLine: '#d2e5ea', key: '#fdfaf3' },
+    ramp: [[0, [204, 222, 176]], [300, [218, 228, 182]], [800, [238, 220, 170]], [1600, [234, 196, 158]],
+      [2800, [216, 174, 168]], [4000, [190, 176, 202]], [5200, [228, 228, 238]], [6600, [250, 250, 252]]],
+    tone: (c, hs) => { const s = Math.min(1.08, 0.8 + 0.32 * hs); return [c[0] * s, c[1] * s, c[2] * s]; },
+    fx: { mottle: [0.3, 0.45, 0.55, 0.5, -0.16], grain: [0.35, 0.33, 0.3, 0.55, -0.12], grainOpacity: 0.35,
+      vignette: null, waterLines: 0.6, grat: 0.12, wash: true },
+  },
+  // Daniel Huffman: sun-printed cyanotype. Everything is Prussian blue and paper white
+  cyanotype: {
+    label: 'Cyanotype', note: 'Sun-printed Prussian blue, after Daniel Huffman’s cyanotypes',
+    C: { ink: '#f3f6fa', ink2: '#d2dfec', ink3: '#c4d6e9', ink4: '#b7cbe0', red: '#ffffff', water: '#dfe9f4',
+      paper: '#1f4a7c', sea: '#1a3f6b', seaLine: '#1a3f6b', key: '#21507f' },
+    ramp: [[0, [0, 0, 0]], [6600, [0, 0, 0]]],
+    tone: (c, hs, e) => mixRGB([22, 54, 100], [236, 242, 249], clamp(0.06 + e / 16000 + 1.9 * (hs - 0.77), 0, 1)),
+    fx: { mottle: [0.85, 0.9, 1, 0.5, -0.2], grain: [1, 1, 1, 0.7, -0.3], grainOpacity: 0.35,
+      vignette: ['#0b1e38', 0.55], waterLines: 0.9, grat: 0.28 },
+  },
+  // Anna Eshelman's Wonderland Trail: moonlit relief with a glowing route
+  night: {
+    label: 'Night', note: 'Moonlit relief and a lantern-lit route, after Anna Eshelman',
+    C: { ink: '#efe6cf', ink2: '#c7c0ae', ink3: '#a9b5c8', ink4: '#99a2b2', red: '#f4b942', water: '#7ea4ca',
+      paper: '#101a2b', sea: '#0b1422', seaLine: '#0b1422', key: '#18243a' },
+    ramp: [[0, [40, 56, 80]], [500, [46, 62, 88]], [1500, [56, 70, 96]], [3000, [72, 84, 110]],
+      [4500, [92, 104, 130]], [5600, [176, 186, 206]], [6600, [222, 230, 242]]],
+    tone: (c, hs) => { const s = Math.min(1.3, 0.3 + 1.05 * hs); return [c[0] * s, c[1] * s, c[2] * s]; },
+    fx: { mottle: null, grain: [1, 1, 1, 0.5, -0.32], grainOpacity: 0.3, vignette: ['#000000', 0.5], waterLines: 0.8, grat: 0.16, glow: true },
+  },
 };
+// The palette the drawing helpers read; buildSheet points it at the chosen style
+const C = { ...STYLES.antique.C };
 
 const RAD = Math.PI / 180;
 const mercY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * RAD) / 2));
@@ -100,18 +157,25 @@ const LEG_KM = STOPS.slice(0, -1).map((_, i) => {
 const CHRONO = buildChronology(LEG_KM);
 
 // ---------- Engraved relief from Terrarium tiles (cached per zoom) ----------
+// Elevation is kept for the latest extent only (it can be >100 MB at z8); tinted images per style are cached.
+let elevCache = { key: null, p: null };
 const reliefCache = {};
-export function relief(Z, ext, onProgress) {
+export function relief(Z, ext, styleKey = 'antique', onProgress) {
   const key = `${Z}:${ext.lon0},${ext.lon1},${ext.lat0},${ext.lat1}`;
-  return (reliefCache[key] ||= engrave(Z, ext, onProgress));
+  return (reliefCache[`${key}:${styleKey}`] ||= (async () => {
+    if (elevCache.key !== key) elevCache = { key, p: loadElevation(Z, ext, (p) => onProgress?.(0.85 * p)) };
+    return engrave(await elevCache.p, STYLES[styleKey], (p) => onProgress?.(0.85 + 0.15 * p));
+  })());
 }
+// Placeholder relief for layout-only passes (nothing is drawn from it)
+export const blankRelief = (ext) => ({ href: '', ...ext });
 // Tiles needed at a zoom for an extent (used to cap memory for big sheets)
 export function tileCount(Z, ext) {
   const n = 2 ** Z, tx = (lon) => Math.floor(((lon + 180) / 360) * n), ty = (lat) => Math.floor(((1 - mercY(lat) / Math.PI) / 2) * n);
   return (tx(ext.lon1) - tx(ext.lon0) + 1) * (ty(ext.lat0) - ty(ext.lat1) + 1);
 }
 
-async function engrave(Z, EXTENT, onProgress) {
+async function loadElevation(Z, EXTENT, onProgress) {
   const n = 2 ** Z;
   const tx = (lon) => ((lon + 180) / 360) * n;
   const ty = (lat) => ((1 - mercY(lat) / Math.PI) / 2) * n;
@@ -137,15 +201,17 @@ async function engrave(Z, EXTENT, onProgress) {
           elev[(oy + j) * W + ox + i] = Math.max(-32000, Math.min(32000, Math.round(d[k] * 256 + d[k + 1] + d[k + 2] / 256 - 32768)));
         }
       } catch { /* missing tile stays flat */ }
-      onProgress?.(0.85 * (++done / (cols * rows)));
+      onProgress?.(++done / (cols * rows));
     }
   };
   await Promise.all(Array.from({ length: 10 }, worker));
+  return { elev, W, H, n, x0, y0, x1, y1 };
+}
 
-  // Horn hillshade from the north-west over a deep sepia hypsometric ramp
-  const ramp = [[0, [232, 213, 166]], [250, [226, 203, 152]], [800, [212, 182, 130]], [1800, [192, 158, 112]],
-    [3200, [166, 138, 106]], [4600, [168, 154, 138]], [5600, [214, 206, 192]], [6600, [240, 236, 226]]];
-  const lut = new Uint8Array(7000 * 3);
+// Horn hillshade from the north-west over the style's hypsometric ramp
+async function engrave({ elev, W, H, n, x0, y0, x1, y1 }, style, onProgress) {
+  const { ramp, tone } = style;
+  const lut = new Float32Array(7000 * 3);
   for (let e = 0; e < 7000; e++) {
     let c = ramp[ramp.length - 1][1];
     for (let i = 1; i < ramp.length; i++) if (e < ramp[i][0]) {
@@ -174,15 +240,15 @@ async function engrave(Z, EXTENT, onProgress) {
         const slope = Math.atan(zf * Math.hypot(dzdx, dzdy));
         const aspect = Math.atan2(dzdy, -dzdx);
         const hs = Math.cos(alt) * Math.cos(slope) + Math.sin(alt) * Math.sin(slope) * Math.cos(az - Math.PI / 2 - aspect);
-        const shade = Math.min(1.14, 0.3 + 0.88 * Math.max(0, hs));
-        const e = Math.min(6999, at(0, 0)) * 3;
+        const ev = Math.min(6999, at(0, 0)), e = ev * 3;
+        const rgb = tone([lut[e], lut[e + 1], lut[e + 2]], Math.max(0, hs), ev);
         const p = (jj * W + i) * 4;
-        o[p] = Math.min(255, lut[e] * shade); o[p + 1] = Math.min(255, lut[e + 1] * shade); o[p + 2] = Math.min(255, lut[e + 2] * shade * 0.96);
+        o[p] = clamp(rgb[0]); o[p + 1] = clamp(rgb[1]); o[p + 2] = clamp(rgb[2]);
         o[p + 3] = 255;
       }
     }
     ctx.putImageData(img, 0, sy);
-    onProgress?.(0.85 + 0.1 * ((sy + hgt) / H));
+    onProgress?.(0.9 * ((sy + hgt) / H));
     await new Promise((r) => setTimeout(r));           // keep the page responsive
   }
   const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
@@ -208,7 +274,9 @@ const boxHit = (a, b) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1
 export const REFERENCE = '18x24';
 export let lastNamed = null;
 
-export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 'classic', EXT = EXTENT) {
+export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 'classic', EXT = EXTENT, styleKey = 'antique') {
+  const S = STYLES[styleKey] || STYLES.antique, FX = S.fx;
+  Object.assign(C, S.C);
   const MAPL = layout === 'map';
   const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100);
   const k = W / 1800;                        // geometric scale vs. the 18 in design
@@ -426,7 +494,7 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
   let waterLines = '';
   for (let i = 8; i >= 1; i--) {
     const wd = i * 7 * k;
-    waterLines += `<path d="${land}" fill="none" stroke="${C.water}" stroke-opacity="${(0.16 + 0.1 * (9 - i) / 8).toFixed(3)}" stroke-width="${f1(wd)}" stroke-linejoin="round"/>`;
+    waterLines += `<path d="${land}" fill="none" stroke="${C.water}" stroke-opacity="${((0.16 + 0.1 * (9 - i) / 8) * FX.waterLines).toFixed(3)}" stroke-width="${f1(wd)}" stroke-linejoin="round"/>`;
     waterLines += `<path d="${land}" fill="none" stroke="${C.seaLine}" stroke-width="${f1(wd - 1.7 * k)}" stroke-linejoin="round"/>`;
   }
 
@@ -451,16 +519,22 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
   <defs>
     <filter id="grain" x="0" y="0" width="100%" height="100%">
       <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" seed="7" result="n"/>
-      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.3  0 0 0 0 0.2  0 0 0 0 0.1  0 0 0 0.6 -0.14"/>
+      <feColorMatrix in="n" type="matrix" values="${tint(FX.grain)}"/>
     </filter>
     <filter id="mottle" x="0" y="0" width="100%" height="100%">
       <feTurbulence type="fractalNoise" baseFrequency="${(0.0042 / k).toFixed(5)}" numOctaves="4" seed="3" result="n"/>
-      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.42  0 0 0 0 0.28  0 0 0 0 0.12  0 0 0 0.62 -0.2"/>
+      <feColorMatrix in="n" type="matrix" values="${tint(FX.mottle || [0, 0, 0, 0, 0])}"/>
     </filter>
     <radialGradient id="vignette" cx="50%" cy="50%" r="72%">
-      <stop offset="58%" stop-color="#5a3b16" stop-opacity="0"/>
-      <stop offset="100%" stop-color="#5a3b16" stop-opacity="0.42"/>
+      <stop offset="58%" stop-color="${FX.vignette?.[0] || '#000'}" stop-opacity="0"/>
+      <stop offset="100%" stop-color="${FX.vignette?.[0] || '#000'}" stop-opacity="${FX.vignette?.[1] || 0}"/>
     </radialGradient>
+    <filter id="pigment" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="${(0.0065 / k).toFixed(5)}" numOctaves="3" seed="11" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.42  0 0 0 0 0.34  0 0 0 0 0.4  0 0 0 0.75 -0.3"/>
+    </filter>
+    <filter id="bleed" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${f1(6 * k)}"/></filter>
+    <filter id="glow" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${f1(7 * ts)}"/></filter>
     <clipPath id="frame"><rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}"/></clipPath>
     <clipPath id="land"><path d="${land}"/></clipPath>
     <style>
@@ -471,7 +545,7 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
       .subtitle { font-style: italic; text-anchor: middle; }
       .facts { text-anchor: middle; fill: ${C.ink2}; }
       .sea { font-style: italic; text-anchor: middle; fill: ${C.water}; }
-      .range, .region { text-anchor: middle; fill: #4b321c; }
+      .range, .region { text-anchor: middle; fill: ${C.ink3}; }
       .region.big { opacity: 0.85; }
       .num { font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 700; text-anchor: middle; }
       .num.end { fill: ${C.key}; }
@@ -481,22 +555,22 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
       .deg { text-anchor: middle; fill: ${C.ink2}; }
       .key-title { text-anchor: middle; }
       .key-n { text-anchor: end; }
-      .key-alt { font-style: italic; fill: #54412e; }
+      .key-alt { font-style: italic; fill: ${C.ink4}; }
       .scale-t { font-style: italic; text-anchor: middle; }
       .rose-n { text-anchor: middle; }
       .legend { font-style: italic; }
-      .credit { fill: #54412e; }
+      .credit { fill: ${C.ink4}; }
       .colophon { font-style: italic; text-anchor: middle; fill: ${C.ink2}; }
       .chron-h { text-anchor: middle; }
-      .chron-r { text-anchor: middle; fill: #4b321c; }
+      .chron-r { text-anchor: middle; fill: ${C.ink3}; }
       .chron-y { text-anchor: middle; fill: ${C.ink2}; }
       .chron-n { font-style: italic; fill: ${C.red}; }
-      .chron-f { font-style: italic; text-anchor: middle; fill: #54412e; }
+      .chron-f { font-style: italic; text-anchor: middle; fill: ${C.ink4}; }
     </style>
   </defs>
 
   <rect width="${W}" height="${H}" fill="${C.paper}"/>
-  <rect width="${W}" height="${H}" filter="url(#mottle)"/>
+  ${FX.mottle ? `<rect width="${W}" height="${H}" filter="url(#mottle)"/>` : ''}
 
   ${border(W, H, k)}
 
@@ -511,11 +585,14 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
     ${waterLines}
     <g clip-path="url(#land)">
       <image href="${rel.href}" x="${f1(rel.x)}" y="${f1(rel.y)}" width="${f1(rel.w)}" height="${f1(rel.h)}" preserveAspectRatio="none"/>
+      ${FX.wash ? `<rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}" filter="url(#pigment)" opacity="0.55"/>
+      <path d="${land}" fill="none" stroke="${C.ink3}" stroke-width="${f1(16 * k)}" stroke-opacity="0.32" filter="url(#bleed)"/>` : ''}
     </g>
-    <path d="${grat}" fill="none" stroke="${C.ink}" stroke-opacity="0.24" stroke-width="${f1(0.8 * k)}"/>
+    <path d="${grat}" fill="none" stroke="${C.ink}" stroke-opacity="${FX.grat}" stroke-width="${f1(0.8 * k)}"/>
     <path d="${rivers}" fill="none" stroke="${C.water}" stroke-width="${f1(1.5 * k)}" stroke-opacity="0.9" stroke-linejoin="round" stroke-linecap="round"/>
     <path d="${land}" fill="none" stroke="${C.ink}" stroke-width="${f1(1.6 * k)}" stroke-linejoin="round"/>
     ${areas}
+    ${FX.glow ? `<path d="${routeD}" fill="none" stroke="${C.red}" stroke-width="${f1(16 * ts)}" stroke-opacity="0.5" stroke-linejoin="round" filter="url(#glow)"/>` : ''}
     <path d="${routeD}" fill="none" stroke="${C.paper}" stroke-width="${f1(8 * ts)}" stroke-linejoin="round" stroke-opacity="0.92"/>
     <path d="${routeD}" fill="none" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}" stroke-linejoin="round"/>
     ${marks}
@@ -541,10 +618,13 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
   <text class="credit" x="${f1(F.x)}" y="${f1(yCredit)}" style="font-size:${fs(13.5)}px">Relief engraved from Mapzen Terrain Tiles · Coastlines &amp; rivers: Natural Earth · Positions of tirths are approximate</text>
   <text class="credit" x="${f1(F.x + F.w)}" y="${f1(yCredit)}" text-anchor="end" style="font-size:${fs(13.5)}px">${esc(fmt.label)} · Mercator projection · Drawn ${new Date().getFullYear()}</text>`}
 
-  <rect width="${W}" height="${H}" fill="url(#vignette)" pointer-events="none"/>
-  <rect width="${W}" height="${H}" filter="url(#grain)" opacity="0.45" pointer-events="none"/>
+  ${FX.vignette ? `<rect width="${W}" height="${H}" fill="url(#vignette)" pointer-events="none"/>` : ''}
+  <rect width="${W}" height="${H}" filter="url(#grain)" opacity="${FX.grainOpacity}" pointer-events="none"/>
 </svg>`;
 }
+
+// [r, g, b, alpha, offset] → feColorMatrix that tints noise one colour
+const tint = ([r, g, b, a, o]) => `0 0 0 0 ${r}  0 0 0 0 ${g}  0 0 0 0 ${b}  0 0 0 ${a} ${o}`;
 
 // relief image placement in this sheet's map units
 function rel_(rel, px, py) {
