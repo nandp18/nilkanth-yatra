@@ -10,7 +10,18 @@ const EXTENT = { lon0: 66.5, lon1: 97.5, lat0: 5.5, lat1: 35.5 };      // Classi
 // Route bounds plus breathing room; the Map layout grows this to fill its frame
 const ROUTE_BOX = { lon0: 67.2, lon1: 98.6, lat0: 6.0, lat1: 32.8 };
 
-export const LAYOUTS = { classic: 'Classic', map: 'Map', detail: 'Detail', strip: 'Strip', profile: 'Profile', panorama: 'Panorama', line: 'Line' };
+export const LAYOUTS = { classic: 'Classic', map: 'Map', detail: 'Detail', panorama: 'Panorama', ridges: 'Ridgelines', strip: 'Strip', profile: 'Profile', line: 'Line' };
+// One line each for the chooser
+export const LAYOUT_NOTES = {
+  classic: 'Title, map, numbered key and a timeline of the years',
+  map: 'The map fills the sheet, with every tirth named on it',
+  detail: 'One region up close, every stop named',
+  panorama: 'A bird’s-eye view north to the Himalaya',
+  ridges: 'The land as stacked lines that rise with the mountains',
+  strip: 'The road in twelve strips, like an old road book',
+  profile: 'The height of the ground along the whole walk',
+  line: 'Just the route: one bold line on an open sheet',
+};
 
 // Regional detail sheets: the stops they cover (1-based, inclusive) and their title
 export const DETAILS = {
@@ -111,6 +122,21 @@ export const STYLES = {
     fx: { mottle: [0.45, 0.3, 0.15, 0.4, -0.16], grain: [0.3, 0.2, 0.1, 0.5, -0.14], grainOpacity: 0.3,
       vignette: null, waterLines: 0.45, grat: 0, motifs: true, waves: true, frame: 'miniature' },
   },
+  // Pichwai (Nathdwara temple hangings): a night-indigo ground, fields picked out in gold,
+  // kadamba trees and cows, lotus ponds for the seas, a red border with a gold vine
+  pichwai: {
+    label: 'Pichwai', note: 'Gold on indigo, lotus ponds, kadamba trees and cows, after Nathdwara pichwais',
+    C: { ink: '#f0d78c', ink2: '#e2c98a', ink3: '#d6b066', ink4: '#bfa477', red: '#ee5a3c', water: '#8cc3c0',
+      paper: '#141a2e', sea: '#163a3e', seaLine: '#163a3e', key: '#2b1d3f',
+      margin: '#8e1b1f', gold: '#d9b25a' },
+    paint: {
+      outline: 1, edge: [214, 172, 82],
+      bands: [[0, [34, 66, 46]], [300, [44, 78, 50]], [800, [74, 84, 50]], [1600, [92, 72, 66]],
+        [3000, [82, 80, 112]], [5700, [222, 218, 204]]],
+    },
+    fx: { mottle: [0.85, 0.7, 0.35, 0.22, -0.14], grain: [1, 0.85, 0.5, 0.5, -0.3], grainOpacity: 0.3,
+      vignette: ['#000000', 0.45], waterLines: 0.3, grat: 0, motifs: 'pichwai', waves: 'lotus', frame: 'pichwai' },
+  },
 };
 // The palette the drawing helpers read; buildSheet points it at the chosen style
 const C = { ...STYLES.antique.C };
@@ -193,14 +219,14 @@ const LEG_KM = STOPS.slice(0, -1).map((_, i) => {
 const CHRONO = buildChronology(LEG_KM);
 
 // ---------- Engraved relief from Terrarium tiles (cached per zoom) ----------
-// Elevation is kept for the latest extent only (it can be >100 MB at z8); tinted images per style are cached.
-let elevCache = { key: null, p: null };
+// Elevation grids are kept for the last few extents (one can be >100 MB at z8); tinted images per style are cached.
+const elevCache = new Map();                 // key → promise; the last few extents/zooms
+const ELEV_SLOTS = 5;
 const reliefCache = {};
 export function relief(Z, ext, styleKey = 'antique', onProgress) {
   const key = `${Z}:${ext.lon0},${ext.lon1},${ext.lat0},${ext.lat1}`;
   return (reliefCache[`${key}:${styleKey}`] ||= (async () => {
-    if (elevCache.key !== key) elevCache = { key, p: loadElevation(Z, ext, (p) => onProgress?.(0.85 * p)) };
-    return engrave(await elevCache.p, STYLES[styleKey], (p) => onProgress?.(0.85 + 0.15 * p));
+    return engrave(await elevationData(Z, ext, (p) => onProgress?.(0.85 * p)), STYLES[styleKey], (p) => onProgress?.(0.85 + 0.15 * p));
   })());
 }
 // Placeholder relief for layout-only passes (nothing is drawn from it)
@@ -308,7 +334,7 @@ async function finish(canvas, { n, x0, y0, x1, y1 }, onProgress, extra = {}) {
 // Also samples the terrain for the painted motifs (peaks, hills, trees) drawn on top.
 async function paint(data, style, onProgress) {
   const { elev, W, H, n, x0, y0 } = data;
-  const { bands, outline } = style.paint;
+  const { bands, outline, edge: edgeRGB } = style.paint;
   // Smoothed elevation: block means, sampled bilinearly, so band edges flow like brushwork
   const B = 6, gw = Math.ceil(W / B), gh = Math.ceil(H / B), grid = new Float32Array(gw * gh);
   for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
@@ -347,7 +373,7 @@ async function paint(data, style, onProgress) {
         const band = bRight;
         bRight = bandOf(smooth(i + 1, j));
         const edge = band !== bRight || band !== bandOf(smooth(i, j + 1)) || band !== bandOf(smooth(i, j + 2));
-        const col = bands[band][1];
+        const col = edge && edgeRGB ? edgeRGB : bands[band][1];
         const s = edge ? outline : hs < 0.6 ? 0.86 : hs > 0.9 ? 1.07 : 1;
         const p = (jj * W + i) * 4;
         o[p] = clamp(col[0] * s); o[p + 1] = clamp(col[1] * s); o[p + 2] = clamp(col[2] * s);
@@ -668,7 +694,7 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
       <text class="credit" x="${f1(cx)}" y="${f1(cart.y + cart.h - fs(22))}" text-anchor="middle" style="font-size:${fs(11)}px">Relief: Mapzen Terrain Tiles · Coastlines: Natural Earth · Tirth positions approximate</text>`;
   }
   const rel = rel_(reliefData, px, py);
-  const motifSvg = FX.motifs ? paintMotifs(reliefData.motifs || [], px, py, ts, discs, R, [...obstacles, ...placed]) : '';
+  const motifSvg = FX.motifs ? paintMotifs(reliefData.motifs || [], px, py, ts, discs, R, [...obstacles, ...placed], FX.motifs) : '';
   const titleSize = fs(150 * face.scale);
 
   return `${sheetOpen(fmt, W, H, k, ts, fs, face, FX, `<clipPath id="frame"><rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}"/></clipPath>
@@ -705,7 +731,7 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
     ${scale}
     ${MAPL ? '' : key}
   </g>
-  ${FX.frame === 'miniature' ? miniatureNeatline(F, k) : neatline(F, px, py, k, fs, EXT)}
+  ${FX.frame === 'miniature' ? miniatureNeatline(F, k) : FX.frame === 'pichwai' ? pichwaiNeatline(F, k) : neatline(F, px, py, k, fs, EXT)}
 
   ${MAPL ? '' : `<g transform="translate(${f1(F.x)}, ${f1(yLegend)})">
     <line x1="0" y1="0" x2="${fs(56)}" y2="0" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}"/>
@@ -749,7 +775,7 @@ export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts =
       <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.42  0 0 0 0 0.34  0 0 0 0 0.4  0 0 0 0.75 -0.3"/>
     </filter>
     <filter id="bleed" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${f1(6 * k)}"/></filter>
-    ${FX.waves ? wavePattern(k) : ''}
+    ${FX.waves === 'lotus' ? lotusPattern(k) : FX.waves ? wavePattern(k) : ''}
     <filter id="glow" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${f1(7 * ts)}"/></filter>
     ${extraDefs}
     <style>
@@ -786,7 +812,7 @@ export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts =
 
   <rect width="${W}" height="${H}" fill="${C.paper}"/>
   ${FX.mottle ? `<rect width="${W}" height="${H}" filter="url(#mottle)"/>` : ''}
-  ${opts.border === false ? '' : FX.frame === 'miniature' ? miniatureBorder(W, H, k) : border(W, H, k)}
+  ${opts.border === false ? '' : FX.frame === 'miniature' ? miniatureBorder(W, H, k) : FX.frame === 'pichwai' ? pichwaiBorder(W, H, k) : border(W, H, k)}
 `;
 }
 export function sheetClose(W, H, FX) {
@@ -846,6 +872,95 @@ function miniatureBorder(W, H, k) {
   g += r(o - band / 2, C.lapis, band) + r(o - band - 1.2 * k, '#f8f1e2', 1.6 * k) + r(o + 1.2 * k, '#f8f1e2', 1.6 * k) + r(o + 6 * k, C.red, 2.4 * k);
   return g;
 }
+// Pichwai: deep red border carrying a gold vine with cream flowers, between gold rules
+function pichwaiBorder(W, H, k) {
+  const o = 48 * k, mid = o / 2, amp = o * 0.17, per = o * 1.25;
+  let g = `<path d="M0,0H${W}V${H}H0Z M${f1(o)},${f1(o)}V${f1(H - o)}H${f1(W - o)}V${f1(o)}Z" fill="${C.margin}" fill-rule="evenodd"/>`;
+  let vine = '', flowers = '';
+  const flower = (x, y, r) => {
+    let f = '';
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2;
+      f += `<ellipse cx="${f1(x + Math.cos(a) * r * 0.55)}" cy="${f1(y + Math.sin(a) * r * 0.55)}" rx="${f1(r * 0.5)}" ry="${f1(r * 0.3)}" transform="rotate(${f1((a / RAD))} ${f1(x + Math.cos(a) * r * 0.55)} ${f1(y + Math.sin(a) * r * 0.55)})"/>`;
+    }
+    return `<g fill="#f6e7c4">${f}</g><circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r * 0.24)}" fill="${C.gold}"/>`;
+  };
+  // one side at a time: a sine vine along the middle of the band, flowers on alternate crests
+  const side = (len, at) => {
+    const n = Math.max(2, Math.round(len / per)), step = len / n;
+    let d = '';
+    for (let i = 0; i <= n * 8; i++) { const t = (i / 8) * step, [x, y] = at(t, Math.sin((t / step) * Math.PI) * amp); d += `${i ? 'L' : 'M'}${f1(x)},${f1(y)}`; }
+    vine += `<path d="${d}" fill="none" stroke="${C.gold}" stroke-width="${f1(1.3 * k)}"/>`;
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) * step, [x, y] = at(t, (i % 2 ? -1 : 1) * amp * 1.05);
+      flowers += flower(x, y, o * 0.2);
+      const [lx, ly] = at(t + step * 0.28, 0);
+      flowers += `<ellipse cx="${f1(lx)}" cy="${f1(ly)}" rx="${f1(o * 0.11)}" ry="${f1(o * 0.05)}" fill="${C.gold}" opacity="0.85"/>`;
+    }
+  };
+  side(W - 2 * o, (t, off) => [o + t, mid + off]);
+  side(W - 2 * o, (t, off) => [o + t, H - mid + off]);
+  side(H - 2 * o, (t, off) => [mid + off, o + t]);
+  side(H - 2 * o, (t, off) => [W - mid + off, o + t]);
+  g += vine + flowers;
+  for (const [x, y] of [[mid, mid], [W - mid, mid], [mid, H - mid], [W - mid, H - mid]]) g += flower(x, y, o * 0.32);
+  const r = (inset, stroke, w) => `<rect x="${f1(inset)}" y="${f1(inset)}" width="${f1(W - 2 * inset)}" height="${f1(H - 2 * inset)}" fill="none" stroke="${stroke}" stroke-width="${f1(w)}"/>`;
+  g += r(3 * k, C.gold, 1.6 * k) + r(o - 1.5 * k, C.gold, 2.4 * k) + r(o + 3 * k, C.gold, 0.8 * k);
+  return g;
+}
+function pichwaiNeatline(F, k) {
+  const { x, y, w, h } = F, t = 6 * k;
+  return `<rect x="${f1(x - t)}" y="${f1(y - t)}" width="${f1(w + 2 * t)}" height="${f1(h + 2 * t)}" fill="none" stroke="${C.gold}" stroke-width="${f1(2.6 * k)}"/>
+  <rect x="${f1(x)}" y="${f1(y)}" width="${f1(w)}" height="${f1(h)}" fill="none" stroke="${C.gold}" stroke-width="${f1(1 * k)}"/>`;
+}
+// Seas as lotus ponds: lily pads, open lotuses and buds among gold ripples
+function lotusPattern(k) {
+  const w = 150 * k, h = 128 * k, u = k;
+  const pad = (x, y, r, rot) => `<path d="M${f1(x)},${f1(y)} L${f1(x + Math.cos(rot) * r)},${f1(y + Math.sin(rot) * r)} A${f1(r)},${f1(r)} 0 1 1 ${f1(x + Math.cos(rot + 0.5) * r)},${f1(y + Math.sin(rot + 0.5) * r)} Z" fill="#2c5a3a" stroke="#c9a95a" stroke-width="${f1(0.6 * u)}"/>`;
+  const lotus = (x, y, r) => {
+    let f = '';
+    for (const a of [-60, -30, 0, 30, 60]) f += `<ellipse cx="${f1(x)}" cy="${f1(y - r * 0.5)}" rx="${f1(r * 0.24)}" ry="${f1(r * 0.55)}" transform="rotate(${a} ${f1(x)} ${f1(y)})" fill="#e79ab2" stroke="#b9506f" stroke-width="${f1(0.5 * u)}"/>`;
+    return f + `<circle cx="${f1(x)}" cy="${f1(y - r * 0.15)}" r="${f1(r * 0.16)}" fill="#e8c35a"/>`;
+  };
+  const bud = (x, y, r) => `<path d="M${f1(x)},${f1(y)} q${f1(-r * 0.45)},${f1(-r * 0.6)} 0,${f1(-r * 1.2)} q${f1(r * 0.45)},${f1(r * 0.6)} 0,${f1(r * 1.2)}Z" fill="#e79ab2" stroke="#b9506f" stroke-width="${f1(0.5 * u)}"/><line x1="${f1(x)}" y1="${f1(y)}" x2="${f1(x)}" y2="${f1(y + r * 0.9)}" stroke="#2c5a3a" stroke-width="${f1(0.9 * u)}"/>`;
+  const rip = (x, y, l) => `<path d="M${f1(x)},${f1(y)} q${f1(l / 4)},${f1(-l / 6)} ${f1(l / 2)},0 q${f1(l / 4)},${f1(l / 6)} ${f1(l / 2)},0" fill="none" stroke="#c9a95a" stroke-opacity="0.45" stroke-width="${f1(0.7 * u)}"/>`;
+  return `<pattern id="waves" width="${f1(w)}" height="${f1(h)}" patternUnits="userSpaceOnUse">
+    ${rip(8 * u, 18 * u, 26 * u)}${rip(70 * u, 64 * u, 30 * u)}${rip(112 * u, 112 * u, 24 * u)}${rip(30 * u, 100 * u, 22 * u)}
+    ${pad(30 * u, 42 * u, 11 * u, 0.4)}${pad(46 * u, 52 * u, 7 * u, 2.2)}${lotus(38 * u, 36 * u, 10 * u)}
+    ${pad(108 * u, 30 * u, 9 * u, 4.1)}${bud(122 * u, 26 * u, 7 * u)}
+    ${pad(92 * u, 92 * u, 12 * u, 1.3)}${lotus(96 * u, 88 * u, 11 * u)}${pad(76 * u, 100 * u, 6 * u, 5.2)}
+    ${pad(14 * u, 116 * u, 7 * u, 3.3)}${bud(140 * u, 76 * u, 6 * u)}
+  </pattern>`;
+}
+// Pichwai motifs: gold-edged rock mounds, silver snow mounds, kadamba trees in flower, grazing cows
+function pichwaiMotifs(items, ts) {
+  const L = (n) => f1(n), gold = C.gold;
+  let g = '';
+  for (const m of items) {
+    const { x, y } = m, sw = L(0.8 * ts);
+    if (m.t === 'peak' || m.t === 'hill') {
+      const s = (m.t === 'peak' ? 13 : 10) * ts * m.s, snow = m.t === 'peak' && (m.e > 4200 || m.s > 1.25);
+      const fill = m.t === 'peak' ? '#57547a' : '#3f5a3a';
+      g += `<path d="M${L(x - s)},${L(y)} C${L(x - s)},${L(y - s * 0.9)} ${L(x - s * 0.45)},${L(y - s * 1.2)} ${L(x)},${L(y - s * 1.2)} C${L(x + s * 0.45)},${L(y - s * 1.2)} ${L(x + s)},${L(y - s * 0.9)} ${L(x + s)},${L(y)} Z" fill="${fill}" stroke="${gold}" stroke-width="${sw}"/>`;
+      if (snow) g += `<path d="M${L(x - s * 0.62)},${L(y - s * 0.95)} C${L(x - s * 0.4)},${L(y - s * 1.2)} ${L(x + s * 0.4)},${L(y - s * 1.2)} ${L(x + s * 0.62)},${L(y - s * 0.95)} Q${L(x + s * 0.3)},${L(y - s * 0.8)} ${L(x)},${L(y - s * 0.92)} Q${L(x - s * 0.3)},${L(y - s * 0.8)} ${L(x - s * 0.62)},${L(y - s * 0.95)} Z" fill="#e4e0d4"/>`;
+      g += `<path d="M${L(x - s * 0.6)},${L(y - s * 0.35)} q${L(s * 0.3)},${L(-s * 0.3)} ${L(s * 0.6)},0 M${L(x - s * 0.1)},${L(y - s * 0.75)} q${L(s * 0.3)},${L(-s * 0.25)} ${L(s * 0.55)},0" fill="none" stroke="${gold}" stroke-width="${L(0.6 * ts)}" stroke-opacity="0.85"/>`;
+    } else if (m.t === 'cypress') {
+      // a cow, facing left or right
+      const s = 6.5 * ts * m.s, dir = (Math.round(m.lon * 97) % 2) ? 1 : -1, X = (v) => L(x + dir * v);
+      g += `<g stroke="#3a2a1a" stroke-width="${L(0.5 * ts)}"><line x1="${X(-s * 0.6)}" y1="${L(y - s * 0.5)}" x2="${X(-s * 0.6)}" y2="${L(y)}"/><line x1="${X(s * 0.5)}" y1="${L(y - s * 0.5)}" x2="${X(s * 0.5)}" y2="${L(y)}"/>
+        <ellipse cx="${L(x)}" cy="${L(y - s * 0.75)}" rx="${L(s * 0.85)}" ry="${L(s * 0.42)}" fill="#f3ead8"/>
+        <ellipse cx="${X(s * 1.0)}" cy="${L(y - s * 1.0)}" rx="${L(s * 0.32)}" ry="${L(s * 0.24)}" fill="#f3ead8"/>
+        <path d="M${X(s * 0.9)},${L(y - s * 1.2)} l${L(dir * -s * 0.1)},${L(-s * 0.3)} M${X(s * 1.1)},${L(y - s * 1.2)} l${L(dir * s * 0.12)},${L(-s * 0.3)}" fill="none" stroke="${gold}"/></g>`;
+    } else {
+      // kadamba in flower
+      const s = 8 * ts * m.s;
+      g += `<line x1="${L(x)}" y1="${L(y)}" x2="${L(x)}" y2="${L(y - s * 0.9)}" stroke="#4a2e1a" stroke-width="${L(1.4 * ts)}"/>`;
+      g += `<circle cx="${L(x)}" cy="${L(y - s * 1.6)}" r="${L(s * 0.95)}" fill="#1d4a2c" stroke="${gold}" stroke-width="${L(0.6 * ts)}"/>`;
+      for (const [dx, dy] of [[-0.45, -0.3], [0.35, -0.45], [0, 0.1], [-0.15, -0.75], [0.5, 0.15]]) g += `<circle cx="${L(x + dx * s)}" cy="${L(y - s * 1.6 + dy * s)}" r="${L(s * 0.13)}" fill="#f2dc8a"/>`;
+    }
+  }
+  return `<g class="motifs">${g}</g>`;
+}
 function miniatureNeatline(F, k) {
   const { x, y, w, h } = F, t = 7 * k;
   return `<rect x="${f1(x - t)}" y="${f1(y - t)}" width="${f1(w + 2 * t)}" height="${f1(h + 2 * t)}" fill="none" stroke="${C.lapis}" stroke-width="${f1(5 * k)}"/>
@@ -859,7 +974,7 @@ function wavePattern(k) {
     <path d="${row(h * 0.45, 0)} ${row(h * 0.95, a)}" fill="none" stroke="${C.wave}" stroke-opacity="0.5" stroke-width="${f1(1.1 * k)}" stroke-linecap="round"/></pattern>`;
 }
 // Painted motifs, drawn back to front, kept clear of the route, stops and furniture
-function paintMotifs(list, px, py, ts, discs, R, obstacles) {
+function paintMotifs(list, px, py, ts, discs, R, obstacles, kind = true) {
   const pts = ROUTE.map(([lo, la]) => [px(lo), py(la)]);
   const clearR = 14 * ts, stopR = R * 2.4;
   const items = list.map((m) => ({ ...m, x: px(m.lon), y: py(m.lat) })).filter((m) => {
@@ -870,6 +985,7 @@ function paintMotifs(list, px, py, ts, discs, R, obstacles) {
     return true;
   }).sort((a, b) => a.y - b.y);
   const L = (n) => f1(n);
+  if (kind === 'pichwai') return pichwaiMotifs(items, ts);
   let g = '';
   for (const m of items) {
     const { x, y } = m, sw = L(0.9 * ts);
@@ -1024,8 +1140,11 @@ function styleColor(S, e) {
 // Raw elevation grid for an extent (shares the relief's cache), and a bilinear sampler over it
 export function elevationData(Z, ext, onProgress) {
   const key = `${Z}:${ext.lon0},${ext.lon1},${ext.lat0},${ext.lat1}`;
-  if (elevCache.key !== key) elevCache = { key, p: loadElevation(Z, ext, onProgress) };
-  return elevCache.p;
+  if (!elevCache.has(key)) {
+    elevCache.set(key, loadElevation(Z, ext, onProgress));
+    while (elevCache.size > ELEV_SLOTS) elevCache.delete(elevCache.keys().next().value);
+  } else { const p = elevCache.get(key); elevCache.delete(key); elevCache.set(key, p); }   // most recent last
+  return elevCache.get(key);
 }
 export function elevationSampler({ elev, W, H, n, x0, y0 }) {
   return (lon, lat) => {

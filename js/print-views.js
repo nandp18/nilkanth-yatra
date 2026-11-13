@@ -1,5 +1,6 @@
 // Print edition: the other ways of seeing the journey, each drawn as one SVG sheet in the chosen style.
 //   Line      minimalist poster: the route as one bold line, the coast as a hairline
+//   Ridges    stacked ridgelines: east–west lines that rise with the land, drawn north to south
 //   Profile   the ground underfoot: elevation along the walk, unrolled in rows
 //   Strip     road-book strips (after Ogilby): the route cut into twelve panels, each turned to run up the page
 //   Panorama  a bird's-eye view from over the Indian Ocean, looking north to the Himalaya
@@ -140,6 +141,70 @@ export function buildLine(fmt, faceKey, styleKey) {
   ${dots}
   ${names}
   ${foot2}
+  ${sheetClose(W, H, FX)}`;
+}
+
+// =====================================================================
+// Ridges: the land as stacked east–west lines, each lifted by the elevation under it
+// =====================================================================
+export function buildRidges(fmt, faceKey, styleKey, sample) {
+  const E = setup(fmt, faceKey, styleKey), { W, H, k, ts, fs, face, FX } = E;
+  const framed = FX.frame === 'miniature' || FX.frame === 'pichwai';       // painted styles keep their borders
+  const M = (framed ? 150 : 130) * k, foot = fs(340);
+  const F = { x: M, y: M + fs(70), w: W - 2 * M, h: H - 2 * M - foot - fs(70) };
+  const lon0 = 67.4, lon1 = 97.4, m0 = mercY(6.4), m1 = mercY(33.6);
+  const sc = Math.min(F.w / ((lon1 - lon0) * RAD), F.h / (m1 - m0));
+  const cx = F.x + F.w / 2, cy = F.y + F.h / 2, clon = (lon0 + lon1) / 2, cm = (m0 + m1) / 2;
+  const px = (lon) => cx + (lon - clon) * RAD * sc, py = (lat) => cy - (mercY(lat) - cm) * sc;
+  const lonAt = (x) => clon + (x - cx) / sc / RAD, latAt = (y) => (2 * Math.atan(Math.exp(cm + (cy - y) / sc)) - Math.PI / 2) / RAD;
+
+  const gap = fs(10), amp = (gap * 10) / 6000, dx = fs(3);          // 6,000 m lifts a line ten spacings
+  const x0 = px(lon0), x1 = px(lon1), yA = py(33.6), yB = py(6.4);
+  let lines = '';
+  for (let y0 = yA; y0 <= yB; y0 += gap) {
+    const lat = latAt(y0);
+    let top = '', land = '', sea = '', run = null;
+    const flush = () => { if (run) { if (run.land) land += run.d; else sea += run.d; run = null; } };
+    for (let x = x0; x <= x1 + 1e-6; x += dx) {
+      const e = sample(lonAt(x), lat), isLand = e > 0, y = y0 - Math.max(0, e) * amp, pt = `${f1(x)},${f1(y)}`;
+      top += `L${pt}`;
+      if (!run || run.land !== isLand) { const prev = run?.last; flush(); run = { land: isLand, d: `M${prev || pt}` }; }
+      run.d += `L${pt}`; run.last = pt;
+    }
+    flush();
+    // paper under each line hides the lines behind (to the north)
+    lines += `<path d="M${f1(x0)},${f1(y0 + gap * 0.4)}${top}L${f1(x1)},${f1(y0 + gap * 0.4)}Z" fill="${C.paper}"/>`;
+    if (sea) lines += `<path d="${sea}" fill="none" stroke="${C.water}" stroke-opacity="0.32" stroke-width="${f1(0.7 * k)}"/>`;
+    if (land) lines += `<path d="${land}" fill="none" stroke="${C.ink}" stroke-width="${f1(1.05 * k)}" stroke-linejoin="round"/>`;
+  }
+
+  // route and tirths sit on the ridges
+  const lift = ([lo, la]) => [px(lo), py(la) - Math.max(0, sample(lo, la)) * amp];
+  const routeD = ROUTE.map((p, i) => { const [x, y] = lift(p); return `${i ? 'L' : 'M'}${f1(x)},${f1(y)}`; }).join('');
+  const taken = [];
+  let dots = '', names = '';
+  STOPS.forEach((s, i) => {
+    const [x, y] = lift([s.lon, s.lat]), end = i === 1 || i === STOPS.length - 1, r = end ? 8 * ts : s.key ? 5 * ts : 3.4 * ts;
+    taken.push([x - r, y - r, x + r, y + r]);
+    dots += `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r)}" fill="${end ? C.red : C.paper}" stroke="${end ? C.paper : C.red}" stroke-width="${f1(1.6 * ts)}"/>`;
+  });
+  for (const [s, i] of STOPS.map((s, i) => [s, i]).filter(([s, i]) => s.key || i === 1)) {
+    const [x, y] = lift([s.lon, s.lat]), text = (i === 1 ? 'Ayodhya' : s.key).toUpperCase(), size = fs(15);
+    const p = placeLabel(x, y, fs(11), text, size, `$px 'IM Fell English SC'`, taken, null, [...new Set([s.side || 'right', 'right', 'left', 'top', 'bottom'])]);
+    if (p) names += `<text class="line-name" x="${f1(p.x)}" y="${f1(p.y)}" text-anchor="${p.anchor}" style="font-size:${size}px;letter-spacing:${fs(3)}px">${esc(text)}</text>`;
+  }
+
+  const mid = W / 2, yT = H - M - fs(130);
+  return `${sheetOpen(fmt, W, H, k, ts, fs, face, FX, `<style>.line-name { font-family: 'IM Fell English SC', Georgia, serif; fill: ${C.ink}; paint-order: stroke; stroke: ${C.paper}; stroke-width: ${fs(6)}px; stroke-linejoin: round; }</style>`, { border: framed })}
+  ${lines}
+  ${FX.glow ? `<path d="${routeD}" fill="none" stroke="${C.red}" stroke-width="${f1(18 * ts)}" stroke-opacity="0.45" stroke-linejoin="round" filter="url(#glow)"/>` : ''}
+  <path d="${routeD}" fill="none" stroke="${C.paper}" stroke-width="${f1(7 * ts)}" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="${routeD}" fill="none" stroke="${C.red}" stroke-width="${f1(3.2 * ts)}" stroke-linejoin="round" stroke-linecap="round"/>
+  ${dots}
+  ${names}
+  <text class="eyebrow" x="${mid}" y="${f1(yT - fs(140 * face.scale))}" style="font-size:${fs(24)}px;letter-spacing:${fs(16)}px">A chart of Shri Nilkanth Varni’s</text>
+  <text class="title" x="${mid}" y="${f1(yT)}" style="font-size:${fs(130 * face.scale)}px;letter-spacing:${f1((face.track + 6) * ts)}px">Van Vicharan</text>
+  <text class="facts" x="${mid}" y="${f1(yT + fs(64))}" style="font-size:${fs(21)}px;letter-spacing:${fs(8)}px">AYODHYA TO LOJ · 1792 – 1799 · ${fmtKm(KM_FROM_AYODHYA)} KM · 65 TIRTHS</text>
   ${sheetClose(W, H, FX)}`;
 }
 
@@ -410,7 +475,8 @@ async function renderPanorama(data, texHref, SW, SH, pal, onProgress) {
 
   const gx = (lon) => (((lon + 180) / 360) * n - x0) * 256, gy = (lat) => (((1 - mercY(lat) / Math.PI) / 2) * n - y0) * 256;
   // Heights from block means (about 5 km), sampled bilinearly: exaggerated raw pixels turn to streaks
-  const B = 4, bw = Math.ceil(W / B), bh = Math.ceil(H / B), grid = new Float32Array(bw * bh);
+  const zs = n / 128;                                   // constants below are tuned at z7
+  const B = Math.max(1, Math.round(4 * zs)), bw = Math.ceil(W / B), bh = Math.ceil(H / B), grid = new Float32Array(bw * bh);
   for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
     let sum = 0, cnt = 0;
     for (let y = by * B; y < Math.min(H, by * B + B); y++) for (let x = bx * B; x < Math.min(W, bx * B + B); x++) { sum += Math.max(0, elev[y * W + x]); cnt++; }
@@ -435,7 +501,7 @@ async function renderPanorama(data, texHref, SW, SH, pal, onProgress) {
     return (grid[o] * (1 - tx) + grid[o + 1] * tx) * (1 - ty) + (grid[o + bw] * (1 - tx) + grid[o + bw + 1] * tx) * ty;
   };
   const mPerPx = (40075016 * Math.cos(20 * RAD)) / (256 * n), V = PANO_V;      // vertical exaggeration
-  const camX = gx(81.2), camY = gy(-3.5), camH = 520;
+  const camX = gx(81.2), camY = gy(-3.5), camH = 520 * zs;
   const zNear = camY - gy(7.4), zFar = camY - gy(35.2);
   // frame: Kanyakumari at the foot of the picture, the far edge of Tibet a fifth of the way down
   const focal = (SH * (0.98 - 0.2)) / (camH * (1 / zNear - 1 / zFar));
@@ -448,7 +514,7 @@ async function renderPanorama(data, texHref, SW, SH, pal, onProgress) {
     for (let x = 0; x < SW; x++) { const p = (y * SW + x) * 4; o[p] = c[0]; o[p + 1] = c[1]; o[p + 2] = c[2]; o[p + 3] = 255; }
   }
   const ybuf = new Float32Array(SW).fill(SH), depth = new Float32Array(SW * SH).fill(Infinity);
-  let z = zNear * 0.86, dz = 0.5, step = 0;
+  let z = zNear * 0.86, dz = 0.5 * zs, step = 0;
   while (z < zFar * 1.06) {
     const wy = camY - z, iy = Math.round(wy), inY = iy >= 0 && iy < H;
     // haze thickens with distance and closes in completely at the far edge of the data
@@ -506,7 +572,10 @@ export async function buildPanorama(fmt, faceKey, styleKey, data, rel, onProgres
   // colours are taken now: the shared palette may change while the view renders
   const pal = { sky0: mixRGB(hex(C.paper), hex(C.water), 0.5), sky1: mixRGB(hex(C.paper), [255, 255, 255], 0.15),
     haze: mixRGB(hex(C.paper), hex(C.sea), 0.35), sea: hex(C.sea) };
-  if (!panoCache.has(ck)) { panoCache.clear(); panoCache.set(ck, renderPanorama(data, rel.href, SW, SH, pal, onProgress)); }
+  if (!panoCache.has(ck)) {
+    panoCache.set(ck, renderPanorama(data, rel.href, SW, SH, pal, onProgress));
+    while (panoCache.size > 3) panoCache.delete(panoCache.keys().next().value);
+  }
   const pano = await panoCache.get(ck);
   useStyle(styleKey);
 
