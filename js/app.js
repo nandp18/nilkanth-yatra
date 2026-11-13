@@ -113,6 +113,19 @@ const RELIEF = ['interpolate', ['linear'], ['elevation'],
   2500, '#bb9479', 3500, '#a68b7f', 4500, '#b4aaa4', 5300, '#e3dfda', 6200, '#ffffff'];
 
 const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Quality tier. 'low' on touch-first phones and on devices with few cores or little
+// memory; ?quality=low|high in the URL overrides it. Low renders at 1.5x while the
+// camera moves, drops contour labels in motion and starts with weather effects off.
+const QUALITY = (() => {
+  const q = new URLSearchParams(location.search).get('quality');
+  if (q === 'low' || q === 'high') return q;
+  const phone = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) <= 820;
+  const weak = (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4;
+  return phone || weak ? 'low' : 'high';
+})();
+const LOW = QUALITY === 'low';
+const BASE_PR = Math.min(devicePixelRatio || 1, 2);
+const MOVING_PR = LOW ? Math.min(BASE_PR, 1.5) : BASE_PR;
 const routeBounds = stopCoords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(stopCoords[0], stopCoords[0]));
 
 const map = new maplibregl.Map({
@@ -124,7 +137,7 @@ const map = new maplibregl.Map({
   pitch: 0,
   maxPitch: 78,
   // Phones report 3×; 2× is indistinguishable on a moving map and draws ~45% fewer pixels
-  pixelRatio: Math.min(devicePixelRatio || 1, 2),
+  pixelRatio: BASE_PR,
   attributionControl: { compact: true },
   style: {
     version: 8,
@@ -182,7 +195,26 @@ if (location.hash === '#debug') window.__map = map;   // handy for console pokin
 new ResizeObserver(() => map.resize()).observe(map.getContainer());
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 const camera = new Camera(map, { reducedMotion: REDUCED_MOTION });
-if (location.hash === '#debug') window.__camera = camera;
+if (location.hash === '#debug') Object.assign(window, { __camera: camera, __quality: QUALITY });
+
+// Low tier: lighter while the camera moves, full quality as soon as it stops.
+// (Not map.isStyleLoaded(): that is false whenever tiles are still loading.)
+let mapReady = false;
+function setMovingQuality(on) {
+  if (!LOW || !mapReady) return;
+  map.setLayoutProperty('contour-labels', 'visibility', !on && ui.contours.checked ? 'visible' : 'none');
+  const pr = on ? MOVING_PR : BASE_PR;
+  if (pr !== map.getPixelRatio()) {
+    // setPixelRatio resizes the canvas; with the map flagged as moving, resize()
+    // doesn't call stop(), which would cancel a drag the user has just started
+    const was = map._moving;
+    map._moving = true;
+    map.setPixelRatio(pr);
+    map._moving = was;
+    map.redraw();                      // draw into the resized canvas now, no blank frame
+  }
+}
+camera.onBusy(setMovingQuality);
 
 // Per-theme layer visibility and paint. Route layers are added on load.
 const THEMES = {
@@ -326,7 +358,19 @@ class FlatMarker extends maplibregl.Marker {
   constructor(opts) {
     super(opts);
     const update = this._update;
-    this._update = (e) => { if (e?.type === 'moveend' && camera.busy) return; update(e); };
+    this._parked = false;
+    this._update = (e) => {
+      if (this._parked || (e?.type === 'moveend' && camera.busy)) return;
+      update(e);
+    };
+  }
+  // A parked marker is off screen or hidden at this zoom: it leaves the layout and
+  // stops being re-placed every frame, until cull() brings it back.
+  park(on) {
+    if (on === this._parked) return;
+    this._parked = on;
+    this._element.style.display = on ? 'none' : '';
+    if (!on) this._update();
   }
   _updateOpacity() {
     if (this._element.style.opacity !== '') this._element.style.opacity = '';
@@ -342,20 +386,23 @@ const stopMarkers = STOPS.map((s, i) => {
   el.addEventListener('click', (e) => { e.stopPropagation(); jumpTo(i); });
   return new FlatMarker({ element: el }).setLngLat([s.lon, s.lat]).addTo(map);
 });
+const cullable = stopMarkers.map((m, i) => ({ m, kind: 'stop', ll: stopCoords[i] }));
 CITIES.forEach((c) => {
   const el = document.createElement('div');
   const left = c.side === 'left';
   el.className = `city${c.minor ? ' minor' : ''}${left ? ' left' : ''}`;
   el.innerHTML = `<div class="fade"><i></i><span>${c.name}</span></div>`;
-  new FlatMarker({ element: el, anchor: left ? 'right' : 'left', offset: [left ? 3 : -3, 0] })
+  const m = new FlatMarker({ element: el, anchor: left ? 'right' : 'left', offset: [left ? 3 : -3, 0] })
     .setLngLat([c.lon, c.lat]).addTo(map);
+  cullable.push({ m, kind: 'city', ll: [c.lon, c.lat] });
 });
 AREAS.forEach((a) => {
   const el = document.createElement('div');
   el.className = `area ${a.kind}`;
   el.innerHTML = `<span class="fade">${a.name}</span>`;
-  new FlatMarker({ element: el, rotation: a.rotate || 0, rotationAlignment: 'map', pitchAlignment: 'map' })
+  const m = new FlatMarker({ element: el, rotation: a.rotate || 0, rotationAlignment: 'map', pitchAlignment: 'map' })
     .setLngLat([a.lon, a.lat]).addTo(map);
+  cullable.push({ m, kind: 'area', ll: [a.lon, a.lat] });
 });
 const travelerEl = document.createElement('div');
 travelerEl.className = 'traveler';
@@ -461,6 +508,7 @@ function drawWalked() {
 // fall behind the stop names rather than washing them out.
 map.getCanvasContainer().insertBefore($('fx-layer'), map.getCanvas().nextSibling);
 const fx = new WeatherFX($('fx'), $('fx-tint'));
+if (LOW) { ui.weather.checked = false; fx.setEnabled(false); }   // the chip still turns it on
 const RAINY = new Set([19, 20, 21, 22, 23, 24, 25, 44, 45, 46, 47]);   // monsoon belts: Bengal, Northeast, Kerala
 const HOT = new Set(['gujarat', 'deccan', 'maharashtra']);
 const WX_ICON = {
@@ -967,7 +1015,7 @@ ui.weather.onchange = () => {
 ui.contours.onchange = () => {
   const v = ui.contours.checked ? 'visible' : 'none';
   map.setLayoutProperty('contour-lines', 'visibility', v);
-  map.setLayoutProperty('contour-labels', 'visibility', v);
+  map.setLayoutProperty('contour-labels', 'visibility', LOW && camera.busy ? 'none' : v);
 };
 window.addEventListener('keydown', (e) => {
   if (e.target.matches('input, select')) return;
@@ -1011,8 +1059,25 @@ let lastLayout = 0;
 let mapW = 0, mapH = 0;
 new ResizeObserver(() => { ({ width: mapW, height: mapH } = container.getBoundingClientRect()); }).observe(container);
 
+// Park markers that can't be seen: areas (overview only) once zoomed in, cities
+// in the overview, and stops well outside the view. The margin covers how far the
+// camera can travel between two checks (~160 ms), so nothing pops in at the edge.
+function cull() {
+  const far = zBand === 'z-far';
+  const mx = mapW * 0.35 + 80, my = mapH * 0.35 + 80;
+  for (const c of cullable) {
+    let hide = lookMode ? false : c.kind === 'area' ? !far : c.kind === 'city' ? far : false;
+    if (!hide && !far && !lookMode && mapW) {
+      const p = map.project(c.ll);
+      hide = !(p.x > -mx && p.x < mapW + mx && p.y > -my && p.y < mapH + my);
+    }
+    c.m.park(hide);
+  }
+}
+
 function layoutLabels() {
   lastLayout = performance.now();
+  cull();
   if (map.getZoom() < FAR_Z) return;
   const ms = parseFloat(container.style.getPropertyValue('--ms')) || 18;
   const pts = stopCoords.map((c) => map.project(c));
@@ -1066,6 +1131,7 @@ function onZoom() {
     zBand = band;
     container.classList.remove('z-far', 'z-mid', 'z-near');
     container.classList.add(band);
+    cull();                            // areas and cities swap in and out with the band
   }
 }
 map.on('zoom', onZoom);
@@ -1090,6 +1156,7 @@ setExag();
 }
 
 map.on('load', () => {
+  mapReady = true;
   map.setTerrain({ source: 'terrain', exaggeration: parseFloat(ui.exag.value) });
 
   map.addSource('route', { type: 'geojson', data: line(path) });
