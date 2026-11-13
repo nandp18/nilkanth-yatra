@@ -32,7 +32,7 @@ The middle dates are **estimates** (shown with ≈). They spread the seven years
 - compass rose and scale bar
 - the 65 tirths keyed in the Indian Ocean, as on the original map
 
-Seven map styles, each with its own relief, palette and paper (`STYLES` in `js/print.js`; open one directly with `print.html?style=night`):
+Eight map styles, each with its own relief, palette and paper (`STYLES` in `js/print.js`; open one directly with `print.html?style=night`):
 - **Antique** (default): the engraved sepia chart.
 - **Natural**: natural-colour shaded relief, after Tom Patterson's National Park Service maps.
 - **Watercolor**: soft pigment washes with pooled edges on cold-press paper, after Molly O'Halloran.
@@ -40,11 +40,15 @@ Seven map styles, each with its own relief, palette and paper (`STYLES` in `js/p
 - **Night**: moonlit relief and a glowing lantern route, after Anna Eshelman's Wonderland Trail map.
 - **Pahari**: painted like a Kangra/Pahari miniature. It has flat, outlined grounds, little snow-capped peaks, hillocks and trees placed from the real terrain, rippled water, and a lapis band on a gold-flecked pink margin.
 - **Pichwai**: gold on indigo, after the Nathdwara temple hangings. Lotus ponds fill the sea, kadamba trees and cows sit on the land, and a red border carries a gold vine.
+- **Kalamkari**: the pen-drawn temple cloths of Srikalahasti. Madder, indigo and mustard on unbleached cotton, with rock pinnacles, trees of life and peacocks on the land, curling waves and fish in the sea, and a paisley border.
 
-Eight layouts. Every one works in every style and at every size:
+Eleven layouts. Every one works in every style and at every size:
 - **Classic**: title block, map, numbered key, legend and a chronicle timeline.
 - **Map**: almost no text. The map fills the sheet, extended to its proportions (more sea to the south, more Tibet to the north), and a small title cartouche sits in the Arabian Sea corner. All 65 stops are named on the map, with leader lines where they crowd, and there's no key. Open it directly with `print.html?layout=map`.
+- **Footprints**: the Map layout with the whole walk traced as alternating footprints (*charan*). A ring of steps circles the three long stays: Muktinath, Gopal Yogi's ashram and Jagannath Puri (`print.html?layout=charan`).
 - **Detail**: one region at a large scale, with every stop named. Choose the region: Himalaya & Nepal (stops 1–18), East (19–29), South (30–51) or West (52–65), e.g. `print.html?layout=detail&region=south`. The cartouche and compass take the emptiest corners, the scale bar picks a round length that fits, and the relief is fetched at about 260 dpi or better.
+- **Tirtha pata**: a pilgrim's scroll, not to scale. The road winds down the sheet row by row past all 65 tirths in order. Each is a little shrine in an arched niche tinted by region: a peak shrine above 2,200 m, a shore shrine by the sea, a temple elsewhere. Year marks sit on the road, and Loj closes the scroll (`?layout=scroll`).
+- **Mandala**: the 65 tirths as lotus petals coloured by region and named round the rim, with rings for the regions and the years, around a medallion of the route itself (`?layout=mandala`).
 - **Strip**: a road-book after John Ogilby. The route is cut into twelve strips of about equal length, each turned to whichever angle fills it largest and read from the bottom up. Each strip has its own north arrow and scale.
 - **Profile**: the height of the ground along the route, unrolled in four rows. It shows every tirth, the new year as it passes, and the highest ground crossed. Heights use a stretched scale so the Deccan reads beside the Himalaya; the gridlines carry the true values.
 - **Panorama**: a bird's-eye view from above the Indian Ocean, looking north, ray-cast from the elevation data in the style's colours. Heights are exaggerated about 36×, and the route is dotted where it passes behind mountains. A key of all 65 tirths sits beneath.
@@ -83,7 +87,7 @@ js/
   sky.js              night sky (astronomy, chart, 3D dome); loaded on demand
   chronology.js       estimated date for each stop
   print.js            print edition renderer: styles, relief, Classic / Map / Detail sheets
-  print-views.js      the other print views: Strip, Profile, Panorama, Ridgelines, Line
+  print-views.js      the other print views: Strip, Profile, Panorama, Ridgelines, Tirtha pata, Mandala, Line
   data/
     stops.js          the 65 tirths, cities, map labels
     skydata.js        generated: star catalog       (npm run build:sky)

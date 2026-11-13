@@ -1,7 +1,7 @@
 // Print edition page: the design chooser (style and layout cards with live thumbnails, region,
 // size and title chips), the preview at relative physical size, and export.
 import { FORMATS, TITLE_FACES, LAYOUTS, LAYOUT_NOTES, STYLES, DETAILS, REFERENCE, kit, extentFor, tileCount, relief, blankRelief, buildSheet, embedFonts, elevationData, elevationSampler } from './print.js';
-import { buildLine, buildProfile, buildStrip, buildPanorama, buildRidges } from './print-views.js';
+import { buildLine, buildProfile, buildStrip, buildPanorama, buildRidges, buildScroll, buildMandala } from './print-views.js';
 import * as printMod from './print.js';
 
 const $ = (id) => document.getElementById(id);
@@ -13,7 +13,7 @@ const state = {
   style: STYLES[params.get('style')] ? params.get('style') : 'antique',
   region: DETAILS[params.get('region')] ? params.get('region') : 'north',
 };
-const MAPPED = new Set(['classic', 'map', 'detail']);      // layouts drawn by buildSheet
+const MAPPED = new Set(['classic', 'map', 'charan', 'detail']);      // layouts drawn by buildSheet
 const pageStyle = document.createElement('style');
 document.head.appendChild(pageStyle);
 let current = '';
@@ -35,11 +35,11 @@ const zoomFor = (f, ext, layout = state.layout) => {
 async function drawSheet(f, face, style, layout, region, { zoom, progress, alive = () => true } = {}) {
   const ALL = kit.EXTENT, z = (ext) => zoom ?? zoomFor(f, ext, layout);
   const elevZ = zoom ?? 7;
-  if (layout === 'line') { await document.fonts.ready; return buildLine(f, face, style); }
-  if (layout === 'profile' || layout === 'ridges') {
+  if (layout === 'line' || layout === 'mandala') { await document.fonts.ready; return (layout === 'line' ? buildLine : buildMandala)(f, face, style); }
+  if (layout === 'profile' || layout === 'ridges' || layout === 'scroll') {
     const sample = elevationSampler(await elevationData(elevZ, ALL, progress?.('Reading elevations')));
     await document.fonts.ready;
-    return (layout === 'profile' ? buildProfile : buildRidges)(f, face, style, sample);
+    return ({ profile: buildProfile, ridges: buildRidges, scroll: buildScroll })[layout](f, face, style, sample);
   }
   if (layout === 'strip') return buildStrip(f, face, style, await relief(z(ALL), ALL, style, progress?.('Engraving relief')));
   if (layout === 'panorama') {
@@ -81,6 +81,25 @@ function sizePreview() {
     : 'Vector map: prints sharp at any size. In the print dialog choose <b>Save as PDF</b>, set margins to <b>None</b>, and turn on <b>Background graphics</b>.';
 }
 
+// The loading card over the preview: what's happening, in words, and how far along
+const STEPS = {
+  'Engraving relief': (p) => (p < 0.85 ? 'Fetching elevation tiles · quicker once cached' : 'Shading the mountains and coasts'),
+  'Reading elevations': () => 'Fetching elevation tiles · quicker once cached',
+  'Drawing the panorama': () => 'Ray-casting the view north to the Himalaya',
+};
+const stepFor = (label, p) => (STEPS[label] || (() => ''))(p);
+function showLoader(title, step, p) {
+  document.body.classList.add('busy');
+  $('loader-title').textContent = title;
+  $('loader-step').textContent = step;
+  const known = typeof p === 'number';
+  $('loader-fill').parentElement.classList.toggle('indeterminate', !known);
+  $('loader-fill').style.width = known ? `${Math.round(p * 100)}%` : '';
+  $('loader-pct').textContent = known ? `${Math.round(p * 100)}%` : '';
+  document.querySelector('.toolbar').style.setProperty('--p', known ? p : 0.08);
+  $('busy-pill').textContent = known ? `${title}… ${Math.round(p * 100)}%` : `${title}…`;
+}
+
 async function render() {
   const my = ++seq, f = FORMATS[state.fmt];
   sizePreview();
@@ -88,19 +107,25 @@ async function render() {
   $('btn-print').disabled = $('btn-svg').disabled = true;
   document.body.classList.remove('ready');
   $('sheet').style.background = STYLES[state.style].C.paper;
-  const progress = (label) => (p) => { if (my === seq) $('status').textContent = `${label}… ${Math.round(p * 100)}%`; };
+  showLoader('Drawing your map', 'Preparing the sheet', null);
+  const progress = (label) => (p) => {
+    if (my !== seq) return;
+    $('status').textContent = `${label}… ${Math.round(p * 100)}%`;
+    showLoader(label, stepFor(label, p), p);
+  };
   let svg;
   try {
     svg = await drawSheet(f, state.face, state.style, state.layout, state.region, { progress, alive: () => my === seq });
   } catch (err) {
     console.error(err);
-    if (my === seq) $('status').textContent = `Could not draw this view: ${err.message}`;
+    if (my === seq) { $('status').textContent = `Could not draw this view: ${err.message}`; document.body.classList.remove('busy'); }
     return;
   }
   if (my !== seq || !svg) return;
   current = svg;
   $('sheet').innerHTML = current;
   $('status').textContent = 'Ready to print';
+  document.body.classList.remove('busy');
   $('btn-print').disabled = $('btn-svg').disabled = false;
   document.body.classList.add('ready');
   thumbs.request();

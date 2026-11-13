@@ -1,4 +1,6 @@
 // Print edition: the other ways of seeing the journey, each drawn as one SVG sheet in the chosen style.
+//   Scroll    tirtha pata: a pilgrim's scroll with every tirth as a shrine, in order
+//   Mandala   the 65 tirths as lotus petals round a medallion of the route
 //   Line      minimalist poster: the route as one bold line, the coast as a hairline
 //   Ridges    stacked ridgelines: east–west lines that rise with the land, drawn north to south
 //   Profile   the ground underfoot: elevation along the walk, unrolled in rows
@@ -6,6 +8,7 @@
 //   Panorama  a bird's-eye view from over the Indian Ocean, looking north to the Himalaya
 // Units match print.js: hundredths of an inch, with type scaled to the sheet (ts = W / 1800).
 import { kit } from './print.js';
+import { REGIONS, REGION_SHORT } from './data/stops.js';
 
 const {
   C, STOPS, ROUTE, CHRONO, LEG_KM, LAND, RIVERS, EXTENT, RAD, mercY, f1, esc, clamp, mixRGB,
@@ -149,7 +152,7 @@ export function buildLine(fmt, faceKey, styleKey) {
 // =====================================================================
 export function buildRidges(fmt, faceKey, styleKey, sample) {
   const E = setup(fmt, faceKey, styleKey), { W, H, k, ts, fs, face, FX } = E;
-  const framed = FX.frame === 'miniature' || FX.frame === 'pichwai';       // painted styles keep their borders
+  const framed = !!FX.frame;                       // painted styles keep their borders
   const M = (framed ? 150 : 130) * k, foot = fs(340);
   const F = { x: M, y: M + fs(70), w: W - 2 * M, h: H - 2 * M - foot - fs(70) };
   const lon0 = 67.4, lon1 = 97.4, m0 = mercY(6.4), m1 = mercY(33.6);
@@ -630,5 +633,247 @@ export async function buildPanorama(fmt, faceKey, styleKey, data, rel, onProgres
   ${key}
   <text class="legend" x="${f1(W / 2)}" y="${f1(H - fs(108))}" text-anchor="middle" style="font-size:${fs(16)}px">Heights exaggerated about ${PANO_V} times · dotted where the route passes behind the mountains · the key gives every tirth by number</text>
   ${credits(E, fmt, 'Relief: Mapzen Terrain Tiles · Drawn in perspective from the elevation data', mx, W - mx)}
+  ${sheetClose(W, H, FX)}`;
+}
+
+// One tint per region, drawn from the style's own colours so it sits in every palette
+const REGION_KEYS = Object.keys(REGIONS);
+function regionTints() {
+  const P = hex(C.paper), bases = [C.red, C.water, C.ink3, C.red, C.water, C.ink3, C.red, C.water, C.ink3, C.red].map(hex);
+  const amt = [0.55, 0.5, 0.45, 0.32, 0.3, 0.28, 0.75, 0.68, 0.6, 0.18];
+  return Object.fromEntries(REGION_KEYS.map((r, i) => [r, rgbStr(mixRGB(P, bases[i], amt[i]))]));
+}
+const lightOn = (rgb) => { const v = rgb.match(/\d+/g).map(Number); return 0.299 * v[0] + 0.587 * v[1] + 0.114 * v[2] > 150; };
+const isFramed = (FX) => !!FX.frame;
+
+// =====================================================================
+// Scroll: a tirtha pata. The road winds down the sheet, row by row, past every tirth in order,
+// each drawn as a little shrine: a peak shrine high up, a shore shrine by the sea, a temple elsewhere
+// =====================================================================
+export function buildScroll(fmt, faceKey, styleKey, sample) {
+  const E = setup(fmt, faceKey, styleKey), { W, H, k, ts, fs, face, FX } = E;
+  const framed = isFramed(FX), M = (framed ? 150 : 120) * k;
+  const head = header(E, M - fs(20), 'A pilgrim’s scroll of the sixty-five tirths', FACTS, 0.78);
+  const tint = regionTints();
+  const per = 8, rows = Math.ceil(STOPS.length / per);
+  const top = head.bottom + fs(40), bottom = H - M - fs(70);
+  const turn = fs(46), X0 = M + turn, X1 = W - M - turn, cw = (X1 - X0) / per;
+  const rowH = (bottom - top) / rows;
+  const nicheW = cw * 0.74, nicheH = rowH * 0.46, pathY = (r) => top + r * rowH + rowH * 0.62;
+  const cellX = (r, j) => (r % 2 ? X1 - (j + 0.5) * cw : X0 + (j + 0.5) * cw);
+  const pos = STOPS.map((_, i) => { const r = Math.floor(i / per), j = i % per; return [cellX(r, j), pathY(r), r, j]; });
+  const finale = STOPS.length % per === 1;                      // Loj alone on the last row: centre it, larger
+  if (finale) pos[STOPS.length - 1][0] = W / 2;
+
+  // the road: straight along each row, a half-turn at the ends
+  let d = `M${f1(X0 - turn * 0.3)},${f1(pathY(0))}`;
+  for (let r = 0; r < rows; r++) {
+    const y = pathY(r), last = r === rows - 1, endX = r % 2 ? X0 : X1;
+    const stopX = last ? pos[STOPS.length - 1][0] : endX;
+    d += `L${f1(stopX)},${f1(y)}`;
+    if (!last) {
+      const y2 = pathY(r + 1), rr = (y2 - y) / 2;
+      d += r % 2 ? `C${f1(X0 - rr * 1.3)},${f1(y)} ${f1(X0 - rr * 1.3)},${f1(y2)} ${f1(X0)},${f1(y2)}` : `C${f1(X1 + rr * 1.3)},${f1(y)} ${f1(X1 + rr * 1.3)},${f1(y2)} ${f1(X1)},${f1(y2)}`;
+    }
+  }
+
+  // what kind of place: high mountain, sea shore or plain
+  const kindOf = (s, i) => {
+    if (i === 0) return 'home';
+    const e = sample(s.lon, s.lat);
+    if (e > 2200) return 'peak';
+    for (const [dx, dy] of [[0.25, 0], [-0.25, 0], [0, 0.25], [0, -0.25], [0.18, 0.18], [-0.18, -0.18], [0.18, -0.18], [-0.18, 0.18]]) if (sample(s.lon + dx, s.lat + dy) <= 0) return 'shore';
+    return 'temple';
+  };
+  const L = f1, ink = C.ink, sw = L(1.1 * ts);
+  const temple = (x, base, s, big) => {
+    // plinth, sanctum, curved shikhara, kalash and flag
+    return `<rect x="${L(x - s * 0.62)}" y="${L(base - s * 0.16)}" width="${L(s * 1.24)}" height="${L(s * 0.16)}" fill="${C.key}" stroke="${ink}" stroke-width="${sw}"/>
+      <rect x="${L(x - s * 0.42)}" y="${L(base - s * 0.62)}" width="${L(s * 0.84)}" height="${L(s * 0.46)}" fill="${C.key}" stroke="${ink}" stroke-width="${sw}"/>
+      <path d="M${L(x - s * 0.13)},${L(base - s * 0.16)} v${L(-s * 0.26)} a${L(s * 0.13)},${L(s * 0.13)} 0 0 1 ${L(s * 0.26)},0 v${L(s * 0.26)} Z" fill="${ink}" fill-opacity="0.75"/>
+      <path d="M${L(x - s * 0.36)},${L(base - s * 0.62)} C${L(x - s * 0.36)},${L(base - s * 1.05)} ${L(x - s * 0.12)},${L(base - s * 1.32)} ${L(x)},${L(base - s * 1.36)} C${L(x + s * 0.12)},${L(base - s * 1.32)} ${L(x + s * 0.36)},${L(base - s * 1.05)} ${L(x + s * 0.36)},${L(base - s * 0.62)} Z" fill="${C.key}" stroke="${ink}" stroke-width="${sw}"/>
+      <path d="M${L(x - s * 0.18)},${L(base - s * 0.64)} C${L(x - s * 0.18)},${L(base - s * 1)} ${L(x - s * 0.05)},${L(base - s * 1.2)} ${L(x)},${L(base - s * 1.3)}" fill="none" stroke="${ink}" stroke-width="${L(0.6 * ts)}" stroke-opacity="0.6"/>
+      <circle cx="${L(x)}" cy="${L(base - s * 1.42)}" r="${L(s * 0.07)}" fill="${C.red}" stroke="${ink}" stroke-width="${L(0.6 * ts)}"/>
+      <line x1="${L(x)}" y1="${L(base - s * 1.48)}" x2="${L(x)}" y2="${L(base - s * 1.78)}" stroke="${ink}" stroke-width="${L(0.8 * ts)}"/>
+      <path d="M${L(x)},${L(base - s * 1.78)} l${L(s * (big ? 0.42 : 0.3))},${L(s * 0.08)} l${L(-s * (big ? 0.42 : 0.3))},${L(s * 0.1)} Z" fill="${C.red}"/>`;
+  };
+  const glyph = (kind, x, base, s, big) => {
+    if (kind === 'peak') {
+      return `<path d="M${L(x - s * 0.95)},${L(base)} L${L(x - s * 0.45)},${L(base - s * 1.3)} L${L(x - s * 0.1)},${L(base - s * 0.75)} L${L(x + s * 0.35)},${L(base - s * 1.55)} L${L(x + s * 0.95)},${L(base)} Z" fill="${C.ink4}" fill-opacity="0.35" stroke="${ink}" stroke-width="${sw}" stroke-linejoin="round"/>
+        <path d="M${L(x + s * 0.35)},${L(base - s * 1.55)} L${L(x + s * 0.12)},${L(base - s * 1.14)} L${L(x + s * 0.27)},${L(base - s * 1.2)} L${L(x + s * 0.38)},${L(base - s * 1.08)} L${L(x + s * 0.55)},${L(base - s * 1.2)} Z M${L(x - s * 0.45)},${L(base - s * 1.3)} L${L(x - s * 0.62)},${L(base - s * 1.0)} L${L(x - s * 0.45)},${L(base - s * 1.06)} L${L(x - s * 0.3)},${L(base - s * 1.04)} Z" fill="#ffffff" stroke="${ink}" stroke-width="${L(0.6 * ts)}"/>
+        ${temple(x, base, s * 0.55, big)}`;
+    }
+    if (kind === 'shore') {
+      let wv = '';
+      for (const [dy, o] of [[0.08, 0], [0.24, 0.25]]) wv += `<path d="M${L(x - s * 0.95 + o * s)},${L(base + s * dy)} q${L(s * 0.15)},${L(-s * 0.12)} ${L(s * 0.3)},0 t${L(s * 0.3)},0 t${L(s * 0.3)},0 t${L(s * 0.3)},0 t${L(s * 0.3)},0" fill="none" stroke="${C.water}" stroke-width="${L(1.2 * ts)}"/>`;
+      return temple(x, base - s * 0.04, s * 0.92, big) + wv;
+    }
+    if (kind === 'home') {
+      return `<path d="M${L(x - s * 0.6)},${L(base)} v${L(-s * 0.6)} l${L(s * 0.6)},${L(-s * 0.45)} l${L(s * 0.6)},${L(s * 0.45)} v${L(s * 0.6)} Z" fill="${C.key}" stroke="${ink}" stroke-width="${sw}" stroke-linejoin="round"/>
+        <path d="M${L(x - s * 0.72)},${L(base - s * 0.52)} l${L(s * 0.72)},${L(-s * 0.55)} l${L(s * 0.72)},${L(s * 0.55)}" fill="none" stroke="${C.red}" stroke-width="${L(2 * ts)}" stroke-linejoin="round"/>
+        <rect x="${L(x - s * 0.13)}" y="${L(base - s * 0.36)}" width="${L(s * 0.26)}" height="${L(s * 0.36)}" fill="${ink}" fill-opacity="0.75"/>`;
+    }
+    return temple(x, base, s, big);
+  };
+
+  let niches = '', labels = '', marks = '', regions = '', years = '';
+  const nameSize = fs(Math.min(17, (cw / 8.5) / k)), font = `$px 'IM Fell English'`;
+  const wrap = (text) => {
+    const max = cw * 0.94, words = text.replace(' – ', ' – ').split(' ');
+    const lines = [''];
+    for (const w of words) { const t = lines.at(-1) ? `${lines.at(-1)} ${w}` : w; if (textWidth(t, font, nameSize) > max && lines.at(-1)) lines.push(w); else lines[lines.length - 1] = t; }
+    return lines.slice(0, 2);
+  };
+  let prevYear = null;
+  STOPS.forEach((s, i) => {
+    const [x, y, r, j] = pos[i], end = i <= 1 || i === STOPS.length - 1;
+    const nTop = y - rowH * 0.12 - nicheH, nx = x - nicheW / 2, fill = tint[s.region];
+    // arched niche, tinted by region
+    niches += `<path d="M${L(nx)},${L(y - rowH * 0.1)} V${L(nTop + nicheW / 2)} A${L(nicheW / 2)},${L(nicheW / 2)} 0 0 1 ${L(nx + nicheW)},${L(nTop + nicheW / 2)} V${L(y - rowH * 0.1)} Z" fill="${fill}" fill-opacity="0.55" stroke="${C.ink}" stroke-opacity="0.55" stroke-width="${L(0.9 * ts)}"/>`;
+    const big = finale && i === STOPS.length - 1;
+    if (big) {
+      // the destination: a wide arch, a large temple, the date of arrival
+      const bw = nicheW * 2.2, bh = nicheH * 1.25, bt = y - rowH * 0.12 - bh;
+      niches = niches.slice(0, niches.lastIndexOf('<path'));
+      niches += `<path d="M${L(x - bw / 2)},${L(y - rowH * 0.1)} V${L(bt + bw / 2.6)} Q${L(x - bw / 2)},${L(bt)} ${L(x)},${L(bt - bh * 0.08)} Q${L(x + bw / 2)},${L(bt)} ${L(x + bw / 2)},${L(bt + bw / 2.6)} V${L(y - rowH * 0.1)} Z" fill="${fill}" fill-opacity="0.6" stroke="${C.ink}" stroke-opacity="0.6" stroke-width="${L(1.1 * ts)}"/>`;
+      niches += glyph('temple', x - nicheW * 0.62, y - rowH * 0.14, nicheH * 0.42, false) + glyph('temple', x + nicheW * 0.62, y - rowH * 0.14, nicheH * 0.42, false) + glyph('temple', x, y - rowH * 0.14, nicheH * 0.62, true);
+      labels += `<text class="scroll-year" x="${L(x)}" y="${L(y + fs(64))}" style="font-size:${fs(17)}px">Arrives at Loj · 21 August 1799</text>`;
+    } else niches += glyph(kindOf(s, i), x, y - rowH * 0.14, Math.min(nicheW * 0.5, nicheH * 0.5), end);
+    // number on the road, name beneath
+    const R = (end ? 14 : 12) * ts;
+    marks += disc(x, y, i, R, ts, fs);
+    wrap(s.name).forEach((line, li) => { labels += `<text class="scroll-name" x="${L(x)}" y="${L(y + R + nameSize * (1.05 + li * 1.05))}" style="font-size:${nameSize}px">${esc(line)}</text>`; });
+    // a region begins: its name over the niche
+    if (i === 0 || s.region !== STOPS[i - 1].region) {
+      regions += `<text class="scroll-region" x="${L(x)}" y="${L(nTop - fs(8))}" style="font-size:${fs(12.5)}px;letter-spacing:${fs(2.5)}px">${esc(REGION_SHORT[s.region].toUpperCase())}</text>`;
+    }
+    // the year turns: a small marker on the road just before the stop
+    const yr = CHRONO[i].date.getUTCFullYear();
+    if (i > 0 && yr !== prevYear && j > 0) {
+      const bx = x + (r % 2 ? 1 : -1) * cw / 2;
+      years += `<line x1="${L(bx)}" y1="${L(y - fs(9))}" x2="${L(bx)}" y2="${L(y + fs(9))}" stroke="${C.ink}" stroke-width="${L(1.2 * ts)}"/><text class="scroll-year" x="${L(bx)}" y="${L(y + fs(25))}" style="font-size:${fs(13)}px">${yr}</text>`;
+    } else if (i > 0 && yr !== prevYear) {
+      years += `<text class="scroll-year" x="${L(r % 2 ? X1 + turn * 0.5 : X0 - turn * 0.5)}" y="${L(y + fs(25))}" style="font-size:${fs(13)}px">${yr}</text>`;
+    }
+    prevYear = yr;
+  });
+
+  return `${sheetOpen(fmt, W, H, k, ts, fs, face, FX, `<style>
+    .scroll-name { font-family: 'IM Fell English', Georgia, serif; fill: ${C.ink}; text-anchor: middle; }
+    .scroll-region { font-family: 'IM Fell English SC', Georgia, serif; fill: ${C.ink2}; text-anchor: middle; }
+    .scroll-year { font-family: 'IM Fell English', Georgia, serif; font-style: italic; fill: ${C.red}; text-anchor: middle; }
+  </style>`, { border: framed })}
+  ${head.svg}
+  ${niches}
+  ${routeStroke(d, ts, FX, ' stroke-linecap="round"')}
+  ${years}
+  ${marks}
+  ${labels}
+  ${regions}
+  ${credits(E, fmt, 'Not to scale · shrines drawn by the lie of the land · dates estimated, see the Classic sheet', M, W - M)}
+  ${sheetClose(W, H, FX)}`;
+}
+
+// =====================================================================
+// Mandala: the 65 tirths as lotus petals, ringed by the years and regions,
+// round a medallion of the route itself
+// =====================================================================
+export function buildMandala(fmt, faceKey, styleKey) {
+  const E = setup(fmt, faceKey, styleKey), { W, H, k, ts, fs, face, FX } = E;
+  const framed = isFramed(FX), M = (framed ? 150 : 120) * k, foot = fs(330);
+  const cx = W / 2, Rmax = Math.min(W / 2 - M, (H - foot - 2 * M) / 2) - fs(10);
+  const blockH = 2 * Rmax + fs(70) + fs(130 * face.scale) + fs(70), cy = Math.max(M + fs(10), (H - blockH) / 2) + Rmax;
+  const nameBand = fs(150), R5 = Rmax - nameBand;                  // petals reach R5
+  const R4 = R5 * 0.78, R3 = R4 - fs(30), R2 = R3 - fs(36), R1 = R2 - fs(16);
+  const N = STOPS.length, A = (i) => -Math.PI / 2 + ((i + 0.5) / N) * Math.PI * 2;   // first tirth at the top, clockwise
+  const P = (a, r) => [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
+  const L = f1, tint = regionTints();
+
+  // petals: a pointed lotus petal per tirth, coloured by region, numbered
+  let petals = '', nums = '', names = '';
+  const half = (Math.PI / N) * 0.96;
+  STOPS.forEach((s, i) => {
+    const a = A(i), [tx, ty] = P(a, R5), [bx, by] = P(a, R4);
+    const [l1x, l1y] = P(a - half, R4 + (R5 - R4) * 0.42), [r1x, r1y] = P(a + half, R4 + (R5 - R4) * 0.42);
+    const [lbx, lby] = P(a - half * 0.75, R4), [rbx, rby] = P(a + half * 0.75, R4);
+    const fill = tint[s.region], end = i <= 1 || i === N - 1;
+    petals += `<path d="M${L(lbx)},${L(lby)} Q${L(l1x)},${L(l1y)} ${L(tx)},${L(ty)} Q${L(r1x)},${L(r1y)} ${L(rbx)},${L(rby)} Z" fill="${end ? C.red : fill}" stroke="${C.ink}" stroke-width="${L(0.9 * ts)}" stroke-linejoin="round"/>`;
+    const [mx, my] = P(a, R4 + (R5 - R4) * 0.36), mid = (bx + tx) / 2;
+    const dark = end || !lightOn(fill);
+    nums += `<text class="m-num" x="${L(mx)}" y="${L(my)}" transform="rotate(${L(a / RAD + 90)} ${L(mx)} ${L(my)})" style="font-size:${fs(15)}px;fill:${dark ? C.paper : C.ink}">${s.n}</text>`;
+    // the name, set outward from the tip, flipped on the left so it reads
+    const [nx, ny] = P(a, R5 + fs(10)), deg = a / RAD, left = Math.cos(a) < -1e-6;
+    const text = shortName(s), size = fs(Math.min(16, (Math.PI * 2 * R5 / N) / k * 0.62));
+    names += `<text class="m-name" x="${L(nx)}" y="${L(ny)}" dy="${L(size * 0.34)}" text-anchor="${left ? 'end' : 'start'}" transform="rotate(${L(left ? deg + 180 : deg)} ${L(nx)} ${L(ny)})" style="font-size:${size}px">${esc(text)}</text>`;
+    void mid; void bx; void by;
+  });
+
+  // year ring: one arc per year, spanning the petals of the tirths reached that year
+  const arc = (a0, a1, r0, r1) => {
+    const [x0, y0] = P(a0, r1), [x1, y1] = P(a1, r1), [x2, y2] = P(a1, r0), [x3, y3] = P(a0, r0), big = a1 - a0 > Math.PI ? 1 : 0;
+    return `M${L(x0)},${L(y0)} A${L(r1)},${L(r1)} 0 ${big} 1 ${L(x1)},${L(y1)} L${L(x2)},${L(y2)} A${L(r0)},${L(r0)} 0 ${big} 0 ${L(x3)},${L(y3)} Z`;
+  };
+  const yearOf = (i) => CHRONO[i].date.getUTCFullYear();
+  let yearRing = '', yearText = '', regionRing = '', regionText = '';
+  const runs = (keyOf) => { const out = []; STOPS.forEach((_, i) => { const kk = keyOf(i); if (!out.length || out.at(-1).k !== kk) out.push({ k: kk, from: i, to: i }); else out.at(-1).to = i; }); return out; };
+  const along = (label, a, r, size, cls) => {
+    // text set tangentially, upright on the lower half
+    const [x, y] = P(a, r), lower = Math.sin(a) > 0.05, deg = a / RAD + (lower ? -90 : 90);
+    return `<text class="${cls}" x="${L(x)}" y="${L(y)}" dy="${L(size * 0.34)}" transform="rotate(${L(deg)} ${L(x)} ${L(y)})" style="font-size:${size}px">${esc(label)}</text>`;
+  };
+  runs(yearOf).forEach((run, n) => {
+    const a0 = A(run.from) - Math.PI / N, a1 = A(run.to) + Math.PI / N;
+    yearRing += `<path d="${arc(a0 + 0.004, a1 - 0.004, R2, R3)}" fill="${n % 2 ? C.key : C.paper}" stroke="${C.ink}" stroke-width="${L(0.8 * ts)}"/>`;
+    if (a1 - a0 > 0.12) yearText += along(String(run.k), (a0 + a1) / 2, (R2 + R3) / 2, fs(17), 'm-year');
+  });
+  runs((i) => STOPS[i].region).forEach((run) => {
+    const a0 = A(run.from) - Math.PI / N, a1 = A(run.to) + Math.PI / N;
+    regionRing += `<path d="${arc(a0, a1, R3 + fs(4), R4 - fs(2))}" fill="${tint[run.k]}" fill-opacity="0.45"/>`;
+    const label = REGION_SHORT[run.k].toUpperCase(), size = fs(11.5);
+    if ((a1 - a0) * (R3 + R4) / 2 > textWidth(label, FELL_SC, size) + fs(18)) regionText += along(label, (a0 + a1) / 2, (R3 + R4) / 2 + fs(1), size, 'm-region');
+  });
+
+  // medallion: the route itself, fitted inside R1
+  const lon0 = Math.min(...STOPS.map((s) => s.lon)) - 0.5, lon1 = Math.max(...STOPS.map((s) => s.lon)) + 0.5;
+  const m0 = mercY(Math.min(...STOPS.map((s) => s.lat)) - 0.5), m1 = mercY(Math.max(...STOPS.map((s) => s.lat)) + 0.5);
+  const sc = (2 * R1 * 0.84) / Math.max((lon1 - lon0) * RAD, m1 - m0);
+  const clon = (lon0 + lon1) / 2, cm = (m0 + m1) / 2;
+  const px = (lon) => cx + (lon - clon) * RAD * sc, py = (lat) => cy - (mercY(lat) - cm) * sc;
+  const path = (flat) => { let d = ''; for (let i = 0; i < flat.length; i += 2) d += `${i ? 'L' : 'M'}${L(px(flat[i]))},${L(py(flat[i + 1]))}`; return d + 'Z'; };
+  const land = LAND.map(path).join('');
+  const routeD = ROUTE.map(([lo, la], i) => `${i ? 'L' : 'M'}${L(px(lo))},${L(py(la))}`).join('');
+  let dots = '';
+  STOPS.forEach((s, i) => { const end = i <= 1 || i === N - 1; dots += `<circle cx="${L(px(s.lon))}" cy="${L(py(s.lat))}" r="${L((end ? 4.5 : 2.4) * ts)}" fill="${end ? C.red : C.paper}" stroke="${C.red}" stroke-width="${L(1 * ts)}"/>`; });
+
+  // dotted rings and a ring of small dots between the petals and the name band
+  const ring = (r, w, dash = '') => `<circle cx="${L(cx)}" cy="${L(cy)}" r="${L(r)}" fill="none" stroke="${C.ink}" stroke-width="${L(w)}"${dash ? ` stroke-dasharray="${dash}"` : ''}/>`;
+  let beads = '';
+  for (let i = 0; i < N; i++) { const [x, y] = P(A(i) + Math.PI / N, R4 + (R5 - R4) * 0.12); beads += `<circle cx="${L(x)}" cy="${L(y)}" r="${L(1.6 * ts)}" fill="${C.ink}"/>`; }
+
+  const yT = cy + Rmax + fs(70) + fs(130 * face.scale);
+  return `${sheetOpen(fmt, W, H, k, ts, fs, face, FX, `<clipPath id="medal"><circle cx="${L(cx)}" cy="${L(cy)}" r="${L(R1)}"/></clipPath>
+    <style>
+      .m-num { font-family: 'IM Fell English', Georgia, serif; text-anchor: middle; dominant-baseline: middle; }
+      .m-name { font-family: 'IM Fell English', Georgia, serif; fill: ${C.ink}; }
+      .m-year { font-family: 'IM Fell English', Georgia, serif; font-style: italic; fill: ${C.ink}; text-anchor: middle; }
+      .m-region { font-family: 'IM Fell English SC', Georgia, serif; fill: ${C.ink2}; text-anchor: middle; letter-spacing: ${fs(2)}px; }
+    </style>`, { border: framed })}
+  <circle cx="${L(cx)}" cy="${L(cy)}" r="${L(R1)}" fill="${C.sea}"/>
+  ${FX.waves ? `<circle cx="${L(cx)}" cy="${L(cy)}" r="${L(R1)}" fill="url(#waves)"/>` : ''}
+  <g clip-path="url(#medal)">
+    <path d="${land}" fill="${rgbStr(mixRGB(hex(C.paper), hex(C.ink), 0.13))}" stroke="${C.ink}" stroke-width="${L(1 * k)}" stroke-linejoin="round"/>
+    ${FX.glow ? `<path d="${routeD}" fill="none" stroke="${C.red}" stroke-width="${L(12 * ts)}" stroke-opacity="0.45" filter="url(#glow)"/>` : ''}
+    <path d="${routeD}" fill="none" stroke="${C.red}" stroke-width="${L(2.6 * ts)}" stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}
+  </g>
+  ${ring(R1, 2.2 * ts)}${ring(R1 + fs(7), 0.8 * ts, `${L(1.5 * ts)} ${L(3 * ts)}`)}
+  ${yearRing}${yearText}
+  ${regionRing}${regionText}
+  ${ring(R3, 1 * ts)}${ring(R4, 1.4 * ts)}
+  ${petals}${nums}${beads}
+  ${names}
+  <text class="eyebrow" x="${L(cx)}" y="${L(yT - fs(130 * face.scale))}" style="font-size:${fs(24)}px;letter-spacing:${fs(14)}px">A chart of Shri Nilkanth Varni’s</text>
+  <text class="title" x="${L(cx)}" y="${L(yT)}" style="font-size:${fs(120 * face.scale)}px;letter-spacing:${L((face.track + 4) * ts)}px">Van Vicharan</text>
+  <text class="facts" x="${L(cx)}" y="${L(yT + fs(62))}" style="font-size:${fs(20)}px;letter-spacing:${fs(7)}px">AYODHYA TO LOJ · 1792 – 1799 · ${fmtKm(KM_FROM_AYODHYA)} KM · 65 TIRTHS</text>
   ${sheetClose(W, H, FX)}`;
 }
