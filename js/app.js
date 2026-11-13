@@ -1,6 +1,8 @@
 import { STOPS, CITIES, AREAS, REGIONS, REGION_SHORT } from './data/stops.js';
 import { WeatherFX, WEATHER_LABEL, WEATHER_SKY, elevationAt } from './weather.js';
 import { buildChronology } from './chronology.js';
+import { Camera, spring } from './camera.js';
+import { prefetchAround } from './prefetch.js';
 
 const DEM_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
@@ -110,12 +112,19 @@ const RELIEF = ['interpolate', ['linear'], ['elevation'],
   0, '#e3e8d2', 150, '#e8e7cd', 400, '#ebdfbb', 800, '#e2cca2', 1500, '#d2b089',
   2500, '#bb9479', 3500, '#a68b7f', 4500, '#b4aaa4', 5300, '#e3dfda', 6200, '#ffffff'];
 
+const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const routeBounds = stopCoords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(stopCoords[0], stopCoords[0]));
+
 const map = new maplibregl.Map({
   container: 'map',
-  center: [82.5, 21.5],
-  zoom: 4.2,
+  // Open already framed on the route, so the first tiles fetched are the ones the
+  // overview needs (no zoom-4 detour); the intro flight only tilts and settles.
+  bounds: routeBounds,
+  fitBoundsOptions: { padding: 40 },
   pitch: 0,
   maxPitch: 78,
+  // Phones report 3×; 2× is indistinguishable on a moving map and draws ~45% fewer pixels
+  pixelRatio: Math.min(devicePixelRatio || 1, 2),
   attributionControl: { compact: true },
   style: {
     version: 8,
@@ -172,6 +181,8 @@ if (location.hash === '#debug') window.__map = map;   // handy for console pokin
 // skips its first ResizeObserver callback, so it never grows. Track the container ourselves.
 new ResizeObserver(() => map.resize()).observe(map.getContainer());
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+const camera = new Camera(map, { reducedMotion: REDUCED_MOTION });
+if (location.hash === '#debug') window.__camera = camera;
 
 // Per-theme layer visibility and paint. Route layers are added on load.
 const THEMES = {
@@ -307,7 +318,16 @@ function fitText(el, max, min) {
 // Markers. MapLibre's terrain occlusion test does a synchronous gl.readPixels per
 // marker every 100 ms; with ~90 markers that stalls the GPU in bursts and makes
 // camera motion stutter. Our markers sit on the route, so skip the test.
+// Markers also re-place themselves on every 'moveend'. The camera moves the map
+// with jumpTo, which fires move *and* moveend each frame, so while it is driving
+// skip the second, identical update (90 markers × 2 per frame was the biggest
+// main-thread cost of a flight on a slow CPU).
 class FlatMarker extends maplibregl.Marker {
+  constructor(opts) {
+    super(opts);
+    const update = this._update;
+    this._update = (e) => { if (e?.type === 'moveend' && camera.busy) return; update(e); };
+  }
   _updateOpacity() {
     if (this._element.style.opacity !== '') this._element.style.opacity = '';
   }
@@ -386,14 +406,22 @@ function setActive(i) {
   active = i;
   stopMarkers.forEach((m, j) => m.getElement().classList.toggle('active', j === i));
   listItems.forEach((li, j) => li.classList.toggle('active', j === i));
-  listItems[i].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  // Scroll only the list (scrollIntoView also scrolls the page on narrow screens).
+  // Leave room for the sticky region heading above the row.
+  {
+    const li = listItems[i], list = ui.list;
+    const head = 44, top = li.offsetTop - list.offsetTop, bottom = top + li.offsetHeight;
+    if (top - head < list.scrollTop) list.scrollTo({ top: top - head, behavior: 'smooth' });
+    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTo({ top: bottom - list.clientHeight, behavior: 'smooth' });
+  }
   ui.roStop.textContent = `Stop ${i + 1} of ${STOPS.length}`;
 
   const s = STOPS[i];
   $('card-num').textContent = s.n;
   $('card-region').textContent = REGIONS[s.region];
   $('card-name').textContent = s.name;
-  fitText($('card-name'), 32, 22);
+  const narrow = innerWidth <= 820;
+  fitText($('card-name'), narrow ? 26 : 32, narrow ? 18 : 22);
   $('card-alt').textContent = [s.alt, s.approx && 'location approximate'].filter(Boolean).join(' · ');
   $('card-note').textContent = s.note || '';
   $('card-leg').textContent = i > 0 ? fmtKm(legKm[i - 1]) : '—';
@@ -622,6 +650,7 @@ async function enterLook() {
     dayPaint[id] = {};
     for (const k of Object.keys(props)) dayPaint[id][k] = map.getPaintProperty(id, k);
   }
+  camera.detach();
   lookMode = true;
   fx.set('clear', 0);
   container.classList.add('night');
@@ -654,12 +683,10 @@ function exitLook() {
   applyTheme(theme);
   map.setCenterClampedToGround(true);
   if (ui.terrain.checked) map.setTerrain({ source: 'terrain', exaggeration: parseFloat(ui.exag.value) });
-  // Return above whichever town you were last looking up from.
-  // (Restore the FOV first: it fires moveend, which would resolve `done` early.)
+  // Return above whichever town you were last looking up from
   map.setVerticalFieldOfView(MAP_FOV);
-  const done = moveEnd();
-  map.flyTo({ center: stopCoords[active], zoom: ARRIVE_ZOOM, pitch: pitchFor(ARRIVE_ZOOM), bearing: 0, duration: 2600, essential: true });
-  done.then(() => { if (!lookMode) map.setMaxPitch(78); });
+  camera.flyTo({ center: stopCoords[active], zoom: ARRIVE_ZOOM, pitch: pitchFor(ARRIVE_ZOOM), bearing: 0, padding: insets() }, { duration: 2600 })
+    .then(() => { if (!lookMode) map.setMaxPitch(78); });
   wx = '';
   lastElev = null;
   updateWeather();
@@ -705,10 +732,12 @@ function applyTheme(name) {
 
 // ---------- Playback ----------
 function setPlaying(on) {
+  const was = playing;
   playing = on;
   ui.play.classList.toggle('playing', on);
   ui.playLabel.textContent = on ? 'Pause' : progress >= LAST ? 'Walk it again' : progress > 0 ? 'Continue' : 'Begin the journey';
   if (!on && raf) { cancelAnimationFrame(raf); raf = null; }
+  if (was && !on && !lookMode) camera.cancel();     // let go of the follow-cam
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -724,6 +753,32 @@ function shortestAngle(from, to) {
   return from + ((((to - from) % 360) + 540) % 360) - 180;
 }
 
+// ---------- Camera framing ----------
+// Keep the subject in the clear part of the map, not under the stop card or the
+// timeline: the card's footprint becomes camera padding (watched.earth does the
+// same with its HUD insets), capped so the free area never gets too small.
+function insets({ card = true } = {}) {
+  const m = container.getBoundingClientRect();
+  const pad = { top: 0, bottom: 0, left: 0, right: 0 };
+  if (!m.width || !m.height) return pad;
+  const gap = 16;
+  const tl = $('timeline').getBoundingClientRect();
+  if (tl.height) pad.bottom = clamp(m.bottom - tl.top + gap, 0, m.height * 0.3);
+  if (!ui.card.classList.contains('hidden')) {
+    const c = ui.card.getBoundingClientRect();
+    if (c.width && c.width < m.width * 0.6) pad.left = clamp(c.right - m.left + gap, 0, m.width * 0.45);   // card beside the subject
+    else if (card && c.height) pad.top = clamp(c.bottom - m.top + gap, 0, m.height * 0.55);           // card above it (phones)
+  }
+  return pad;
+}
+
+// Warm the cache for the tiles around a place before the camera gets there
+const TILE_SETS = {
+  atlas: [{ url: DEM_URL, maxzoom: 12 }],
+  satellite: [{ url: DEM_URL, maxzoom: 12 }, { url: SAT_URL, maxzoom: 18 }],
+};
+const prefetch = (lngLat, zoom, opts) => prefetchAround(TILE_SETS[theme], lngLat, zoom, opts);
+
 // ---------- Continuous playback engine ----------
 // One rAF loop drives the whole journey. The traveler moves at a constant
 // *screen* speed (so zooming out on long legs covers ground faster), eases into
@@ -733,15 +788,10 @@ function shortestAngle(from, to) {
 const SCREEN_PX_PER_S = 170;       // traveler speed on screen at 1x
 const DWELL_S = 1.2;               // pause at each tirth at 1x
 
-// Exact critically damped spring step
-function spring(x, v, target, omega, dt) {
-  const d = x - target, e = Math.exp(-omega * dt);
-  return [target + (d + (v + omega * d) * dt) * e, (v - omega * (v + omega * d) * dt) * e];
-}
 const pxPerKm = (zoom, lat) => (512 * 2 ** zoom) / (40075 * Math.cos(toRad(lat)));
 const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
-const engine = { v: 0, z: 0, zv: 0, b: 0, bv: 0, dwell: 0, last: 0 };
+const engine = { v: 0, z: 0, zv: 0, b: 0, bv: 0, dwell: 0, last: 0, leg: -1, pad: null };
 
 // Camera zoom we want at this point: pulled back to frame long legs while
 // cruising, settling to ARRIVE_ZOOM near each tirth.
@@ -752,8 +802,18 @@ function targetZoom(i, f) {
   return lerp(ARRIVE_ZOOM, cruise, smoothstep(0, clamp(L * 0.3, 2, 140), near));
 }
 
+// Look ahead: while walking leg i, fetch tiles along it and around the next two tirths
+function prefetchLeg(i) {
+  for (const k of [0.33, 0.66]) prefetch(pointAt(i + k), targetZoom(i, k), { radius: 1 });
+  for (const j of [i + 1, i + 2]) if (j <= LAST) prefetch(stopCoords[j], ARRIVE_ZOOM);
+}
+
 function tick(now) {
   if (!playing) return;
+  // Ask for the next frame before drawing: map.redraw() below then cancels the
+  // render MapLibre scheduled for itself, so each frame is drawn exactly once
+  // (it was being drawn twice, which held playback near 40 fps).
+  raf = requestAnimationFrame(tick);
   const dt = Math.min(0.05, (now - engine.last) / 1000);
   engine.last = now;
   const sp = speedVal;
@@ -762,6 +822,7 @@ function tick(now) {
   const i = Math.min(Math.floor(progress + 1e-9), LAST - 1);
   const f = legDistFrac(i, progress - i);
   const [, lat] = pointAt(progress);
+  if (i !== engine.leg) { engine.leg = i; prefetchLeg(i); }
 
   // Zoom spring (also used for pacing when the camera isn't following)
   if (follow) {
@@ -790,6 +851,7 @@ function tick(now) {
       engine.v = 0;
       engine.dwell = p >= LAST ? 0 : DWELL_S / sp;
       setActive(p);
+      engine.pad = insets();        // the card may have changed height
     } else {
       p = i + legTAt(i, f2);
     }
@@ -801,30 +863,32 @@ function tick(now) {
     const drift = engine.dwell > 0 ? 2.5 * dt : 0;          // slow orbit while dwelling
     engine.b += drift;
     [engine.b, engine.bv] = spring(engine.b, engine.bv, shortestAngle(engine.b, legB), 0.9, dt);
-    map.jumpTo({ center: pointAt(p), zoom: engine.z, bearing: engine.b, pitch: pitchFor(engine.z) });
+    // Render now, in the same frame as the DOM markers moved, with the ground
+    // height under the camera smoothed so it doesn't bob over ridgelines
+    camera.frame({ center: pointAt(p), zoom: engine.z, bearing: engine.b, pitch: pitchFor(engine.z), padding: engine.pad }, dt);
+  } else {
+    map.redraw();
   }
-  // Render now, in the same frame as the DOM markers moved, instead of next frame
-  map.redraw();
 
-  if (p >= LAST) { setPlaying(false); return; }
-  raf = requestAnimationFrame(tick);
+  if (p >= LAST) { setPlaying(false); }
 }
-
-const moveEnd = () => new Promise((r) => map.once('moveend', r));
 
 async function play() {
   if (progress >= LAST) { jumpTo(0, { fly: false }); await sleep(300); }
   setPlaying(true);
+  engine.pad = insets();
   const c = map.project(pointAt(progress));
   const { width, height } = container.getBoundingClientRect();
-  const offCentre = Math.hypot(c.x - width / 2, c.y - height / 2) > 40;
+  const fx0 = engine.pad.left + (width - engine.pad.left - engine.pad.right) / 2;
+  const fy0 = engine.pad.top + (height - engine.pad.top - engine.pad.bottom) / 2;
+  const offCentre = Math.hypot(c.x - fx0, c.y - fy0) > 40;
+  prefetchLeg(Math.min(Math.floor(progress), LAST - 1));
   if (ui.follow.checked && (offCentre || Math.abs(map.getZoom() - ARRIVE_ZOOM) > 0.4)) {
-    const done = moveEnd();
-    map.flyTo({ center: pointAt(progress), zoom: ARRIVE_ZOOM, pitch: pitchFor(ARRIVE_ZOOM), bearing: 0, duration: 2600 / speedVal, essential: true });
-    await done;
-    if (!playing) return;
+    const arrived = await camera.flyTo({ center: pointAt(progress), zoom: ARRIVE_ZOOM, pitch: pitchFor(ARRIVE_ZOOM), bearing: 0, padding: engine.pad }, { speed: Math.sqrt(speedVal) });
+    if (!playing || !arrived) { if (playing) setPlaying(false); return; }
   }
-  Object.assign(engine, { v: 0, z: map.getZoom(), zv: 0, b: map.getBearing(), bv: 0, dwell: 0.25, last: performance.now() });
+  if (ui.follow.checked) camera.hold();
+  Object.assign(engine, { v: 0, z: map.getZoom(), zv: 0, b: map.getBearing(), bv: 0, dwell: 0.25, last: performance.now(), leg: -1 });
   raf = requestAnimationFrame(tick);
 }
 
@@ -840,17 +904,27 @@ function jumpTo(i, { fly = true } = {}) {
   }
   if (fly) {
     const zoom = ARRIVE_ZOOM + 0.8;
-    map.flyTo({ center: stopCoords[i], zoom, pitch: pitchFor(zoom), bearing: map.getBearing(), duration: 2400, essential: true });
+    prefetch(stopCoords[i], zoom, { front: true });
+    camera.flyTo({ center: stopCoords[i], zoom, pitch: pitchFor(zoom), bearing: map.getBearing(), padding: insets() });
   }
 }
 
-function overview(duration = 2200) {
+// The whole route, framed in the clear part of the map
+function overviewCamera() {
+  const pad = insets({ card: false });     // on phones the card may sit over the far north of the route
+  const { clientWidth: W, clientHeight: H } = container;
+  const M = maplibregl.MercatorCoordinate;
+  const sw = M.fromLngLat(routeBounds.getSouthWest()), ne = M.fromLngLat(routeBounds.getNorthEast());
+  const w = Math.max(80, W - pad.left - pad.right - 80), h = Math.max(80, H - pad.top - pad.bottom - 80);
+  // a 28° tilt foreshortens north–south distances a little, so allow ~10% more height
+  const zoom = Math.log2(Math.min(w / ((ne.x - sw.x) * 512), (h * 1.1) / ((sw.y - ne.y) * 512)));
+  const centre = new M((sw.x + ne.x) / 2, (sw.y + ne.y) / 2).toLngLat();
+  return { center: [centre.lng, centre.lat], zoom, pitch: 28, bearing: 0, padding: pad };
+}
+
+function overview(opts) {
   setPlaying(false);
-  const b = new maplibregl.LngLatBounds();
-  stopCoords.forEach((c) => b.extend(c));
-  // clear the card on the left, but leave the route at least ~420px on narrow windows
-  const left = Math.max(60, Math.min(380, map.getContainer().clientWidth - 480));
-  map.fitBounds(b, { padding: { top: 60, bottom: 120, left, right: 60 }, pitch: 28, bearing: 0, duration, essential: true });
+  return camera.flyTo(overviewCamera(), opts);
 }
 
 // ---------- Wiring ----------
@@ -865,6 +939,7 @@ ui.scrub.oninput = () => {
   setPlaying(false);
   setProgress(parseFloat(ui.scrub.value));
   setActive(Math.round(progress));
+  camera.cancel();
   map.easeTo({ center: pointAt(progress), duration: 250 });
 };
 const setExag = () => {
@@ -876,6 +951,13 @@ const setExag = () => {
 ui.exag.oninput = setExag;
 ui.terrain.onchange = () => {
   map.setTerrain(ui.terrain.checked ? { source: 'terrain', exaggeration: parseFloat(ui.exag.value) } : null);
+};
+ui.follow.onchange = () => {
+  if (!playing) return;
+  if (ui.follow.checked) {             // pick the camera up from wherever it is
+    Object.assign(engine, { z: map.getZoom(), zv: 0, b: map.getBearing(), bv: 0, pad: insets() });
+    camera.hold();
+  } else camera.cancel();               // hand it back; the walk carries on
 };
 ui.weather.onchange = () => {
   fx.setEnabled(ui.weather.checked);
@@ -966,20 +1048,46 @@ function layoutLabels() {
     }
   }
 }
-map.on('move', () => { if (performance.now() - lastLayout > 120) layoutLabels(); });
-map.on('moveend', layoutLabels);
+// The camera drives the map with jumpTo, which fires moveend every frame, so
+// while it is busy labels are laid out on the throttled move path only.
+map.on('move', () => { if (performance.now() - lastLayout > (camera.busy ? 160 : 120)) layoutLabels(); });
+map.on('moveend', () => { if (!camera.busy) layoutLabels(); });
+camera.onBusy((on) => { if (!on) layoutLabels(); });
 
+// Writing --ms restyles every marker, so only write it when it actually changes
+// (quantised to half pixels), not on every zoom event of a flight.
+let msNow = '', zBand = '';
 function onZoom() {
   const z = map.getZoom();
-  container.style.setProperty('--ms', `${clamp(lerp(15, 22, (z - 4) / 5), 15, 22).toFixed(1)}px`);
-  container.classList.toggle('z-far', z < 6.2);
-  container.classList.toggle('z-mid', z >= 6.2 && z < 7);
-  container.classList.toggle('z-near', z >= 7);
+  const ms = `${(Math.round(clamp(lerp(15, 22, (z - 4) / 5), 15, 22) * 2) / 2).toFixed(1)}px`;
+  if (ms !== msNow) { msNow = ms; container.style.setProperty('--ms', ms); }
+  const band = z < 6.2 ? 'z-far' : z < 7 ? 'z-mid' : 'z-near';
+  if (band !== zBand) {
+    zBand = band;
+    container.classList.remove('z-far', 'z-mid', 'z-near');
+    container.classList.add(band);
+  }
 }
 map.on('zoom', onZoom);
 onZoom();
 applyTheme('atlas');
 setExag();
+
+// Tile streaming indicator: a thin line along the top of the map while tiles are
+// still arriving (shown only if loading lasts more than a beat, so quick hops stay quiet)
+{
+  const bar = document.createElement('div');
+  bar.id = 'stream';
+  bar.setAttribute('aria-hidden', 'true');
+  container.appendChild(bar);
+  let since = 0;
+  setInterval(() => {
+    if (document.hidden || !map.isStyleLoaded()) return;
+    const busy = !map.areTilesLoaded();
+    since = busy ? since || performance.now() : 0;
+    bar.classList.toggle('on', busy && performance.now() - since > 350);
+  }, 200);
+}
 
 map.on('load', () => {
   map.setTerrain({ source: 'terrain', exaggeration: parseFloat(ui.exag.value) });
@@ -1016,5 +1124,6 @@ map.on('load', () => {
   setProgress(0);
   setActive(0);
   setPlaying(false);
-  overview(3200);
+  // Intro: from the flat opening frame, tilt up and settle on the route
+  overview({ duration: REDUCED_MOTION ? 0 : 2800 });
 });
