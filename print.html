@@ -12,22 +12,61 @@
 <body>
   <header class="toolbar">
     <a href="./" class="back">← Back to the map</a>
-    <div class="controls">
-      <div class="seg" id="styles" role="radiogroup" aria-label="Map style"></div>
-      <div class="seg" id="layouts" role="radiogroup" aria-label="Layout"></div>
-      <div class="seg" id="regions" role="radiogroup" aria-label="Region" hidden></div>
-      <div class="seg" id="sizes" role="radiogroup" aria-label="Print size"></div>
-      <div class="seg" id="faces" role="radiogroup" aria-label="Title typeface"></div>
-    </div>
+    <span class="busy-pill" id="busy-pill">Drawing…</span><span class="summary" id="summary"></span>
     <button id="btn-svg" class="ghost" disabled>Download SVG</button>
     <button id="btn-print" class="primary" disabled>Print / Save PDF</button>
   </header>
 
-  <main class="sheet-wrap" id="sheet-wrap">
-    <div class="sheet" id="sheet"></div>
-    <p class="caption"><span id="caption"></span><span class="status" id="status">Engraving relief…</span></p>
-    <p class="hint" id="hint">Vector map: prints sharp at any size. In the print dialog choose <b>Save as PDF</b>, set margins to <b>None</b>, and turn on <b>Background graphics</b>.</p>
-  </main>
+  <div class="studio">
+    <aside class="panel" aria-label="Design your map">
+      <section>
+        <h2>Style</h2>
+        <div class="cards" id="styles" role="radiogroup" aria-label="Map style"></div>
+      </section>
+      <section>
+        <h2>Layout</h2>
+        <div class="cards" id="layouts" role="radiogroup" aria-label="Layout"></div>
+        <div class="sub" id="region-row" hidden>
+          <h3>Region</h3>
+          <div class="chips" id="regions" role="radiogroup" aria-label="Region"></div>
+        </div>
+      </section>
+      <section>
+        <h2>Size</h2>
+        <div class="chips" id="sizes" role="radiogroup" aria-label="Sheet size"></div>
+      </section>
+      <section>
+        <h2>Title lettering</h2>
+        <div class="chips" id="faces" role="radiogroup" aria-label="Title typeface"></div>
+      </section>
+    </aside>
+
+    <main class="sheet-wrap" id="sheet-wrap">
+      <div class="stage">
+        <div class="sheet" id="sheet"></div>
+        <div class="loader" id="loader" role="status" aria-live="polite">
+          <div class="loader-card">
+            <svg class="loader-rose" viewBox="-24 -24 48 48" aria-hidden="true">
+              <circle r="21" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 3.5" opacity=".5"/>
+              <circle r="16" fill="none" stroke="currentColor" stroke-width="1" opacity=".35"/>
+              <path d="M0,-19 L4,0 L0,19 L-4,0 Z" fill="currentColor" opacity=".25"/>
+              <path d="M-19,0 L0,-4 L19,0 L0,4 Z" fill="currentColor" opacity=".25"/>
+              <path d="M0,-19 L4,0 L-4,0 Z" fill="#e2701b"/>
+              <circle r="2.2" fill="currentColor"/>
+            </svg>
+            <div class="loader-text">
+              <b id="loader-title">Engraving relief</b>
+              <span id="loader-step">Fetching elevation tiles</span>
+            </div>
+            <div class="loader-bar"><i id="loader-fill"></i></div>
+            <span class="loader-pct" id="loader-pct"></span>
+          </div>
+        </div>
+      </div>
+      <p class="caption"><span id="caption"></span><span class="status" id="status">Engraving relief…</span></p>
+      <p class="hint" id="hint">Vector map: prints sharp at any size. In the print dialog choose <b>Save as PDF</b>, set margins to <b>None</b>, and turn on <b>Background graphics</b>.</p>
+    </main>
+  </div>
 
   <script type="module" src="js/print-page.js"></script>
 </body>
