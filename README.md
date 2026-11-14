@@ -55,7 +55,7 @@ Eleven layouts. Every one works in every style and at every size:
 - **Ridgelines**: the subcontinent drawn as stacked east–west lines of elevation, like the Joy Division cover (`print.html?layout=ridges`).
 - **Line**: a minimal poster. It shows the route as one bold line, the coast as a hairline, the milestones in small capitals and a large quiet title.
 
-Formats are **12 × 16 in**, **18 × 24 in**, **24 × 36 in** and **A2**, plus an **8.5 × 11 in test** sheet that prints inside ¼ in margins on a home printer (`print.html?size=letter`). Every format carries the same content: the stops named on the 18 × 24 in reference sheet are named on all of them. Each one lays out separately:
+Formats are **11 × 17 in** (tabloid, `?size=11x17`), **12 × 16 in**, **18 × 24 in**, **24 × 36 in** and **A2**, plus an **8.5 × 11 in test** sheet that prints inside ¼ in margins on a home printer (`print.html?size=letter`). Every format carries the same content: the stops named on the 18 × 24 in reference sheet are named on all of them. Each one lays out separately:
 - Type is sized for viewing distance.
 - As many stop names are placed as fit without colliding.
 - The map narrows if the sheet is short.
