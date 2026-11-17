@@ -3,6 +3,7 @@
 import { FORMATS, TITLE_FACES, LAYOUTS, LAYOUT_NOTES, STYLES, DETAILS, REFERENCE, kit, extentFor, tileCount, relief, blankRelief, buildSheet, embedFonts, elevationData, elevationSampler } from './print.js';
 import { buildLine, buildProfile, buildStrip, buildPanorama, buildRidges, buildScroll, buildMandala } from './print-views.js';
 import * as printMod from './print.js';
+import { SPANS, drawPlace, placeInfo } from './print-place.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -12,7 +13,17 @@ const state = {
   layout: LAYOUTS[params.get('layout')] ? params.get('layout') : 'classic',
   style: STYLES[params.get('style')] ? params.get('style') : 'antique',
   region: DETAILS[params.get('region')] ? params.get('region') : 'north',
+  // Any place: a chart of wherever you like, in the same styles
+  mode: params.get('mode') === 'place' ? 'place' : 'journey',
+  span: SPANS[params.get('span')] ? params.get('span') : '300',
+  towns: params.get('towns') === 'off' ? 'off' : 'on',
+  place: placeFromParams() || { lat: 28.817, lon: 83.872, title: 'Muktinath', sub: 'Mustang, Nepal' },
 };
+function placeFromParams() {
+  const [lat, lon] = (params.get('at') || '').split(',').map(Number);
+  if (!params.get('at') || !(Math.abs(lat) <= 90) || !(Math.abs(lon) <= 180)) return null;
+  return { lat, lon, title: params.get('name') || 'Untitled', sub: params.get('sub') || '' };
+}
 const MAPPED = new Set(['classic', 'map', 'charan', 'detail']);      // layouts drawn by buildSheet
 const pageStyle = document.createElement('style');
 document.head.appendChild(pageStyle);
@@ -64,17 +75,18 @@ async function drawSheet(f, face, style, layout, region, { zoom, progress, alive
 
 function sizePreview() {
   const f = FORMATS[state.fmt];
+  const PLACE = state.mode === 'place';
   const maxH = Math.max(420, window.innerHeight - 150);
   const h = maxH * Math.sqrt(f.h / 36);            // bigger sheets preview bigger
   const w = Math.min(h * (f.w / f.h), $('sheet-wrap').clientWidth - 48);
   $('sheet').style.width = `${w}px`;
   $('sheet').style.aspectRatio = `${f.w} / ${f.h}`;
   const ext = extentFor(f, state.layout, state.region), z = zoomFor(f, ext);
-  const dpi = Math.round((256 * 2 ** z * ((ext.lon1 - ext.lon0) / 360)) / (f.w * (state.layout === 'classic' ? 0.8 : 0.88)));
+  const dpi = PLACE ? placeInfo(f, state.place, state.span).dpi : Math.round((256 * 2 ** z * ((ext.lon1 - ext.lon0) / 360)) / (f.w * (state.layout === 'classic' ? 0.8 : 0.88)));
   const [pw, ph] = f.page || [f.w, f.h];
   $('caption').textContent = f.page
     ? `${f.label} · prints ${f.w} × ${f.h} in inside ${f.margin} in margins · type is ${Math.round((f.w / 18) * 100)}% of the 18 × 24 in size`
-    : `${f.label} · ${(f.w * 2.54).toFixed(1)} × ${(f.h * 2.54).toFixed(1)} cm${MAPPED.has(state.layout) ? ` · relief at about ${dpi} dpi` : ''}`;
+    : `${f.label} · ${(f.w * 2.54).toFixed(1)} × ${(f.h * 2.54).toFixed(1)} cm${PLACE ? ` · ${SPANS[state.span].label} across` : ''}${PLACE || MAPPED.has(state.layout) ? ` · relief at about ${dpi} dpi` : ''}`;
   pageStyle.textContent = `@page { size: ${pw}in ${ph}in; margin: ${f.margin || 0}in; }`;
   $('hint').innerHTML = f.page
     ? 'Test print for a home printer: choose <b>Letter</b> paper, margins <b>Default</b>, scale <b>100%</b>, and turn on <b>Background graphics</b>. Check colour and layout; the key is small at this size.'
@@ -85,6 +97,7 @@ function sizePreview() {
 const STEPS = {
   'Engraving relief': (p) => (p < 0.85 ? 'Fetching elevation tiles · quicker once cached' : 'Shading the mountains and coasts'),
   'Reading elevations': () => 'Fetching elevation tiles · quicker once cached',
+  'Tracing the coast': () => 'Finding the shoreline, rivers and towns',
   'Drawing the panorama': () => 'Ray-casting the view north to the Himalaya',
 };
 const stepFor = (label, p) => (STEPS[label] || (() => ''))(p);
@@ -115,7 +128,9 @@ async function render() {
   };
   let svg;
   try {
-    svg = await drawSheet(f, state.face, state.style, state.layout, state.region, { progress, alive: () => my === seq });
+    svg = state.mode === 'place'
+      ? await drawPlace(f, state.face, state.style, state.place, { span: state.span, towns: state.towns === 'on', progress, alive: () => my === seq })
+      : await drawSheet(f, state.face, state.style, state.layout, state.region, { progress, alive: () => my === seq });
   } catch (err) {
     console.error(err);
     if (my === seq) { $('status').textContent = `Could not draw this view: ${err.message}`; document.body.classList.remove('busy'); }
@@ -141,7 +156,10 @@ $('layouts').innerHTML = Object.entries(LAYOUTS).map(([k, l]) => card('layout', 
 $('regions').innerHTML = Object.entries(DETAILS).map(([k, d]) => chip('region', k, d.label, ` title="${d.title}"`)).join('');
 $('sizes').innerHTML = Object.entries(FORMATS).map(([k, f]) => chip('fmt', k, f.short, ` title="${f.label}"`)).join('');
 $('faces').innerHTML = Object.entries(TITLE_FACES).map(([k, f]) => chip('face', k, f.label, ` style="font-family:${f.family}"`)).join('');
-const GROUP_KEY = { style: 'style', layout: 'layout', region: 'region', fmt: 'fmt', face: 'face' };
+$('modes').innerHTML = chip('mode', 'journey', 'The journey') + chip('mode', 'place', 'Any place');
+$('spans').innerHTML = Object.entries(SPANS).map(([k, s]) => chip('span', k, s.label)).join('');
+$('towns').innerHTML = chip('towns', 'on', 'Named') + chip('towns', 'off', 'Hidden');
+const GROUP_KEY = { style: 'style', layout: 'layout', region: 'region', fmt: 'fmt', face: 'face', mode: 'mode', span: 'span', towns: 'towns' };
 
 document.querySelector('.panel').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-group]');
@@ -168,11 +186,18 @@ function syncChooser() {
     b.tabIndex = on ? 0 : -1;
   }
   $('region-row').hidden = state.layout !== 'detail';
-  const f = FORMATS[state.fmt];
-  $('summary').textContent = `${STYLES[state.style].label} · ${LAYOUTS[state.layout]}${state.layout === 'detail' ? ` (${DETAILS[state.region].label})` : ''} · ${f.short}`;
+  const f = FORMATS[state.fmt], PLACE = state.mode === 'place', P = state.place;
+  $('place-section').hidden = !PLACE;
+  $('layout-section').hidden = PLACE;
+  if (document.activeElement !== $('place-title')) $('place-title').value = P.title;
+  if (document.activeElement !== $('place-sub')) $('place-sub').value = P.sub;
+  $('summary').textContent = PLACE ? `${P.title} · ${STYLES[state.style].label} · ${f.short}`
+    : `${STYLES[state.style].label} · ${LAYOUTS[state.layout]}${state.layout === 'detail' ? ` (${DETAILS[state.region].label})` : ''} · ${f.short}`;
   // keep the address shareable
-  const q = new URLSearchParams({ style: state.style, layout: state.layout, size: state.fmt });
-  if (state.layout === 'detail') q.set('region', state.region);
+  const q = new URLSearchParams(PLACE
+    ? { mode: 'place', at: `${P.lat},${P.lon}`, name: P.title, ...(P.sub ? { sub: P.sub } : {}), span: state.span, ...(state.towns === 'off' ? { towns: 'off' } : {}), style: state.style, size: state.fmt }
+    : { style: state.style, layout: state.layout, size: state.fmt });
+  if (!PLACE && state.layout === 'detail') q.set('region', state.region);
   if (state.face !== 'didone') q.set('title', state.face);
   history.replaceState(null, '', `?${q}`);
 }
@@ -185,7 +210,7 @@ const thumbs = {
   done: new Map(), queue: [], busy: false,
   wanted() {
     const list = Object.keys(STYLES).map((s) => [s, 'map', 'style']);
-    for (const l of Object.keys(LAYOUTS)) list.push([state.style, l, 'layout']);
+    if (state.mode !== 'place') for (const l of Object.keys(LAYOUTS)) list.push([state.style, l, 'layout']);
     return list;
   },
   request() {
@@ -232,6 +257,72 @@ async function rasterize(svg, w, h) {
   } finally { URL.revokeObjectURL(url); }
 }
 
+// ---------- Any place: search, pick, title ----------
+// Place search is OpenStreetMap's Nominatim: one request per search (no type-ahead), per its usage policy
+const note = (html) => { $('place-note').innerHTML = html; };
+const OSM_NOTE = 'Search by <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>. The coast is traced at sea level from the elevation data.';
+note(OSM_NOTE);
+function choosePlace(p, widthKm) {
+  state.place = p;
+  if (widthKm) {                                         // open on the span that best frames what was found
+    const want = Math.max(100, widthKm * 1.5);         // a town opens with its surroundings; 25 km is a click away
+    state.span = Object.keys(SPANS).reduce((a, b) => (Math.abs(Math.log(SPANS[b].km / want)) < Math.abs(Math.log(SPANS[a].km / want)) ? b : a));
+  }
+  $('place-results').hidden = true;
+  render();
+}
+let found = [];
+$('place-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = $('place-q').value.trim();
+  if (!q) return;
+  const ll = q.match(/^(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)$/);
+  if (ll && Math.abs(+ll[1]) <= 90 && Math.abs(+ll[2]) <= 180) {
+    choosePlace({ lat: +ll[1], lon: +ll[2], title: state.place.title, sub: state.place.sub });
+    note('Centred on those coordinates. Set the title below.');
+    return;
+  }
+  const btn = $('place-form').querySelector('button');
+  btn.disabled = true;
+  note('Searching…');
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language=en&q=${encodeURIComponent(q)}`);
+    if (!res.ok) throw new Error(res.status);
+    found = (await res.json()).map((r) => {
+      const parts = r.display_name.split(', ').filter((x) => !/^[\d\s-]+$/.test(x)), [s, n, w, e2] = (r.boundingbox || []).map(Number);
+      const title = r.name || parts[0], rest = parts.filter((x) => x !== title);
+      // subtitle: the widest two parts of the address (state or region, country)
+      const km = Number.isFinite(w) ? (e2 - w) * 111.32 * Math.cos((+r.lat * Math.PI) / 180) : 0;
+      return { place: { lat: +(+r.lat).toFixed(4), lon: +(+r.lon).toFixed(4), title, sub: rest.slice(-2).join(', ') }, km, full: rest.join(', ') };
+    });
+    const ul = $('place-results');
+    ul.replaceChildren(...found.map((f, i) => {
+      const li = document.createElement('li'), b = document.createElement('button'), t = document.createElement('b'), s = document.createElement('span');
+      b.type = 'button'; b.dataset.i = i; t.textContent = f.place.title; s.textContent = f.full;
+      b.append(t, s); li.append(b);
+      return li;
+    }));
+    ul.hidden = !found.length;
+    note(found.length ? OSM_NOTE : 'Nothing found for that. Try another spelling, or type coordinates like <b>21.53, 70.46</b>.');
+    if (found.length === 1) choosePlace(found[0].place, found[0].km);
+  } catch (err) {
+    console.error(err);
+    note('The place search could not be reached. Try again, or type coordinates like <b>21.53, 70.46</b>.');
+  } finally { btn.disabled = false; }
+});
+$('place-results').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-i]');
+  if (b) choosePlace(found[b.dataset.i].place, found[b.dataset.i].km);
+});
+let titleTimer = 0;
+for (const [id, key] of [['place-title', 'title'], ['place-sub', 'sub']]) {
+  $(id).addEventListener('input', () => {
+    state.place = { ...state.place, [key]: $(id).value };
+    clearTimeout(titleTimer);
+    titleTimer = setTimeout(render, 450);
+  });
+}
+
 window.addEventListener('resize', sizePreview);
 $('btn-print').onclick = () => window.print();
 $('btn-svg').onclick = async () => {
@@ -239,7 +330,9 @@ $('btn-svg').onclick = async () => {
   const svg = await embedFonts(current);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
-  a.download = `van-vicharan-${state.style}-${state.layout}${state.layout === 'detail' ? `-${state.region}` : ''}-${state.fmt}.svg`;
+  const slug = state.place.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'map';
+  a.download = state.mode === 'place' ? `${slug}-${state.style}-${state.fmt}.svg`
+    : `van-vicharan-${state.style}-${state.layout}${state.layout === 'detail' ? `-${state.region}` : ''}-${state.fmt}.svg`;
   a.click();
   $('status').textContent = 'Ready to print';
 };

@@ -200,6 +200,8 @@ if (location.hash === '#debug') Object.assign(window, { __camera: camera, __qual
 // Low tier: lighter while the camera moves, full quality as soon as it stops.
 // (Not map.isStyleLoaded(): that is false whenever tiles are still loading.)
 let mapReady = false;
+let resolveLoaded;
+const mapLoaded = new Promise((r) => (resolveLoaded = r));   // settles after the load handler has added the route layers
 function setMovingQuality(on) {
   if (!LOW || !mapReady) return;
   map.setLayoutProperty('contour-labels', 'visibility', !on && ui.contours.checked ? 'visible' : 'none');
@@ -551,7 +553,7 @@ async function updateWeather() {
 }
 
 function applySky() {
-  if (!map.getLayer('route-dash')) return;
+  if (!map.getLayer('route-dash') || lookMode) return;
   const base = ui.weather.checked ? WEATHER_SKY[wx === 'flurries' ? 'snow' : wx] : {};
   map.setSky({ ...THEMES[theme].sky, ...base });
 }
@@ -561,9 +563,12 @@ const line = (coords) => ({ type: 'Feature', geometry: { type: 'LineString', coo
 // ---------- Night sky ----------
 // sky.js (astronomy-engine + a 200 KB star catalog) loads on first use.
 let skyMod = null, skyLoading = null;
-const loadSky = () => (skyLoading ||= import('./sky.js').then((m) => (skyMod = m)));
+// A failed import is forgotten so the next click retries instead of reusing the rejection.
+const loadSky = () => (skyLoading ||= import('./sky.js').then((m) => (skyMod = m), (err) => { skyLoading = null; throw err; }));
+const SKY_FAIL = 'Couldn’t load the night sky. Check your connection and try again.';
 let skyOpen = false;
 let lookMode = false;
+let entering = false;            // enterLook in flight: ignore repeat clicks
 let skyState = null;
 let dayPaint = null;
 const LOOK_PITCH = 104;          // >90 looks above the horizon
@@ -585,7 +590,9 @@ async function updateSkyCard() {
   $('sky-date').textContent = `${c.kind === 'estimated' ? '≈ ' : ''}${fmtDate(c.date)}`;
   if (!skyOpen && !lookMode) return;
   const seq = ++skySeq;
-  const sk = await loadSky();
+  let sk;
+  try { sk = await loadSky(); }
+  catch { if (seq === skySeq) $('sky-note').textContent = SKY_FAIL; return; }
   if (seq !== skySeq) return;
   const s = STOPS[i];
   const hour = parseFloat($('sky-hour').value);
@@ -656,7 +663,9 @@ const lookOptions = () => map.calculateCameraOptionsFromCameraLngLatAltRotation(
 
 // easeTo/flyTo cap pitch at 90° and ignore camera altitude, so the descent into
 // first person is tweened by hand: camera position, altitude (log scale), heading, pitch.
+let tweenSeq = 0;
 function tweenCamera(to, duration, hump = 0) {
+  const seq = ++tweenSeq;
   const tr = map.transform;
   const ll = tr.getCameraLngLat();
   const from = { lngLat: [ll.lng, ll.lat], alt: Math.max(1, tr.getCameraAltitude()), bearing: map.getBearing(), pitch: map.getPitch() };
@@ -664,7 +673,7 @@ function tweenCamera(to, duration, hump = 0) {
   const t0 = performance.now();
   return new Promise((resolve) => {
     const step = (now) => {
-      if (!lookMode) return resolve();
+      if (!lookMode || seq !== tweenSeq) return resolve();
       const k = smoothstep(0, 1, (now - t0) / duration);
       const pitch = hump > 0
         ? (k < 0.5 ? lerp(from.pitch, 70, k * 2) : lerp(70, to.pitch, (k - 0.5) * 2))   // glance down while travelling
@@ -691,7 +700,16 @@ async function standAt(i, bearing, duration, travel = false, pitch = LOOK_PITCH)
 }
 
 async function enterLook() {
-  await loadSky();
+  if (entering || lookMode) return;
+  entering = true;
+  const btn = $('btn-lookup');
+  btn.disabled = true;
+  try { await loadSky(); }
+  catch { $('sky-note').textContent = SKY_FAIL; return; }
+  finally { entering = false; btn.disabled = false; }
+  // night paint touches route layers that only exist once the map has loaded
+  await mapLoaded;
+  if (lookMode) return;
   setPlaying(false);
   dayPaint = {};
   for (const [id, props] of Object.entries(NIGHT)) {
@@ -720,8 +738,10 @@ async function enterLook() {
   await standAt(active, moonUp ? m.az : 180, 4200, false, 90 + gaze);
 }
 
-function exitLook() {
+const arriveCamera = () => ({ center: stopCoords[active], zoom: ARRIVE_ZOOM, pitch: pitchFor(ARRIVE_ZOOM), bearing: 0, padding: insets() });
+function exitLook(to = arriveCamera()) {
   lookMode = false;
+  tweenSeq++;
   container.classList.remove('night');
   ui.card.classList.remove('looking');
   $('btn-lookup').textContent = 'Look up ↑';
@@ -733,7 +753,7 @@ function exitLook() {
   if (ui.terrain.checked) map.setTerrain({ source: 'terrain', exaggeration: parseFloat(ui.exag.value) });
   // Return above whichever town you were last looking up from
   map.setVerticalFieldOfView(MAP_FOV);
-  camera.flyTo({ center: stopCoords[active], zoom: ARRIVE_ZOOM, pitch: pitchFor(ARRIVE_ZOOM), bearing: 0, padding: insets() }, { duration: 2600 })
+  camera.flyTo(to, { duration: 2600 })
     .then(() => { if (!lookMode) map.setMaxPitch(78); });
   wx = '';
   lastElev = null;
@@ -775,7 +795,8 @@ function applyTheme(name) {
   });
   lastCut = -1;
   drawWalked();
-  applySky();
+  if (lookMode) { applyNightPaint(); map.triggerRepaint(); }   // keep the night look and transparent sky
+  else applySky();
 }
 
 // ---------- Playback ----------
@@ -982,8 +1003,13 @@ ui.play.onclick = () => {
 };
 ui.prev.onclick = () => jumpTo(Math.ceil(progress - 1e-6) - 1);
 ui.next.onclick = () => jumpTo(Math.floor(progress + 1e-6) + 1);
-ui.overview.onclick = () => overview();
+ui.overview.onclick = () => (lookMode ? exitLook(overviewCamera()) : overview());
 ui.scrub.oninput = () => {
+  if (lookMode) {                       // walk under the stars to the nearest town
+    const i = Math.round(parseFloat(ui.scrub.value));
+    if (i !== active) jumpTo(i);
+    return;
+  }
   setPlaying(false);
   setProgress(parseFloat(ui.scrub.value));
   setActive(Math.round(progress));
@@ -994,10 +1020,11 @@ const setExag = () => {
   const v = parseFloat(ui.exag.value);
   ui.exagOut.textContent = `${v.toFixed(1)}×`;
   ui.exag.style.setProperty('--p', `${((v - ui.exag.min) / (ui.exag.max - ui.exag.min)) * 100}%`);
-  if (ui.terrain.checked && map.getTerrain()) map.setTerrain({ source: 'terrain', exaggeration: v });
+  if (ui.terrain.checked && map.getTerrain() && !lookMode) map.setTerrain({ source: 'terrain', exaggeration: v });
 };
 ui.exag.oninput = setExag;
 ui.terrain.onchange = () => {
+  if (lookMode) return;                 // stays at true scale; exitLook applies the choice
   map.setTerrain(ui.terrain.checked ? { source: 'terrain', exaggeration: parseFloat(ui.exag.value) } : null);
 };
 ui.follow.onchange = () => {
@@ -1193,4 +1220,5 @@ map.on('load', () => {
   setPlaying(false);
   // Intro: from the flat opening frame, tilt up and settle on the route
   overview({ duration: REDUCED_MOTION ? 0 : 2800 });
+  resolveLoaded();
 });

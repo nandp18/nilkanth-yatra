@@ -20,10 +20,35 @@
   <div class="studio">
     <aside class="panel" aria-label="Design your map">
       <section>
+        <div class="seg" id="modes" role="radiogroup" aria-label="What to draw"></div>
+      </section>
+      <section id="place-section" hidden>
+        <h2>Place</h2>
+        <form class="search" id="place-form" role="search">
+          <input id="place-q" type="search" placeholder="Search a place, or type lat, lon" autocomplete="off" aria-label="Search for a place" />
+          <button type="submit">Search</button>
+        </form>
+        <ul class="results" id="place-results" hidden></ul>
+        <p class="field-note" id="place-note"></p>
+        <div class="sub">
+          <h3>Distance across</h3>
+          <div class="chips" id="spans" role="radiogroup" aria-label="Distance across the map"></div>
+        </div>
+        <div class="sub">
+          <h3>Title on the map</h3>
+          <input class="field" id="place-title" type="text" maxlength="40" aria-label="Title" />
+          <input class="field" id="place-sub" type="text" maxlength="60" placeholder="Subtitle (optional)" aria-label="Subtitle" />
+        </div>
+        <div class="sub">
+          <h3>Nearby towns</h3>
+          <div class="chips" id="towns" role="radiogroup" aria-label="Nearby towns"></div>
+        </div>
+      </section>
+      <section>
         <h2>Style</h2>
         <div class="cards" id="styles" role="radiogroup" aria-label="Map style"></div>
       </section>
-      <section>
+      <section id="layout-section">
         <h2>Layout</h2>
         <div class="cards" id="layouts" role="radiogroup" aria-label="Layout"></div>
         <div class="sub" id="region-row" hidden>
