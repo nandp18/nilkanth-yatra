@@ -234,6 +234,7 @@ function drawMoon(ctx, x, y, r, elong, toSun) {
 export function drawChart(canvas, sky) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const S = canvas.clientWidth;
+  if (S < 40) return;               // hidden or not laid out yet: nothing to draw
   if (canvas.width !== S * dpr || canvas.height !== S * dpr) { canvas.width = canvas.height = S * dpr; }
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
