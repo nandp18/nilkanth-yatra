@@ -242,10 +242,12 @@ const CHRONO = buildChronology(LEG_KM);
 const elevCache = new Map();                 // key → promise; the last few extents/zooms
 const ELEV_SLOTS = 5;
 const reliefCache = {};
-export function relief(Z, ext, styleKey = 'antique', onProgress) {
+// opts (used by the any-place sheets): zf = vertical exaggeration of the shading,
+// motifStep = spacing of the painted motifs in degrees, world = no India-specific rules
+export function relief(Z, ext, styleKey = 'antique', onProgress, opts = {}) {
   const key = `${Z}:${ext.lon0},${ext.lon1},${ext.lat0},${ext.lat1}`;
-  return (reliefCache[`${key}:${styleKey}`] ||= (async () => {
-    return engrave(await elevationData(Z, ext, (p) => onProgress?.(0.85 * p)), STYLES[styleKey], (p) => onProgress?.(0.85 + 0.15 * p));
+  return (reliefCache[`${key}:${styleKey}:${opts.zf || ''}:${opts.motifStep || ''}`] ||= (async () => {
+    return engrave(await elevationData(Z, ext, (p) => onProgress?.(0.85 * p)), STYLES[styleKey], (p) => onProgress?.(0.85 + 0.15 * p), opts);
   })());
 }
 // Placeholder relief for layout-only passes (nothing is drawn from it)
@@ -290,8 +292,8 @@ async function loadElevation(Z, EXTENT, onProgress) {
 }
 
 // Horn hillshade from the north-west over the style's hypsometric ramp
-async function engrave(data, style, onProgress) {
-  if (style.paint) return paint(data, style, onProgress);
+async function engrave(data, style, onProgress, opts = {}) {
+  if (style.paint) return paint(data, style, onProgress, opts);
   const { elev, W, H, n, y0 } = data;
   const { ramp, tone } = style;
   const lut = new Float32Array(7000 * 3);
@@ -303,7 +305,7 @@ async function engrave(data, style, onProgress) {
     }
     lut.set(c, e * 3);
   }
-  const az = 315 * RAD, alt = 40 * RAD, zf = 3.1;
+  const az = 315 * RAD, alt = 40 * RAD, zf = opts.zf ?? 3.1;
   const canvas = new OffscreenCanvas(W, H);
   const ctx = canvas.getContext('2d');
   const strip = 256;
@@ -351,7 +353,7 @@ async function finish(canvas, { n, x0, y0, x1, y1 }, onProgress, extra = {}) {
 // Flat colour bands from smoothed elevation, each outlined in a darker tone, with only
 // three steps of light (shadow, ground, highlight), the way a miniature paints its hills.
 // Also samples the terrain for the painted motifs (peaks, hills, trees) drawn on top.
-async function paint(data, style, onProgress) {
+async function paint(data, style, onProgress, opts = {}) {
   const { elev, W, H, n, x0, y0 } = data;
   const { bands, outline, edge: edgeRGB } = style.paint;
   // Smoothed elevation: block means, sampled bilinearly, so band edges flow like brushwork
@@ -368,7 +370,7 @@ async function paint(data, style, onProgress) {
   };
   const bandOf = (e) => { let b = 0; while (b < bands.length - 1 && e >= bands[b + 1][0]) b++; return b; };
 
-  const az = 315 * RAD, alt = 40 * RAD, zf = 3.1;
+  const az = 315 * RAD, alt = 40 * RAD, zf = opts.zf ?? 3.1;
   const canvas = new OffscreenCanvas(W, H);
   const ctx = canvas.getContext('2d');
   const strip = 256;
@@ -403,13 +405,14 @@ async function paint(data, style, onProgress) {
     onProgress?.(0.9 * ((sy + hgt) / H));
     await new Promise((r) => setTimeout(r));
   }
-  return finish(canvas, data, onProgress, { motifs: motifs(data, smooth) });
+  return finish(canvas, data, onProgress, { motifs: motifs(data, smooth, opts) });
 }
 
 // Sample the land on a staggered 0.42° grid: rugged high ground → painted peaks,
 // rugged middle ground → rounded hills, gentle low ground → trees (fewer in the dry north-west)
-function motifs({ elev, W, H, n, x0, y0 }, smooth) {
-  const out = [], step = 0.42;
+function motifs({ elev, W, H, n, x0, y0 }, smooth, opts = {}) {
+  const out = [], step = opts.motifStep ?? 0.42;
+  const q = clamp((step / 0.42) ** 0.6, 0.12, 1.5);     // smaller cells hold less relief: scale the thresholds
   const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
   const toPx = (lon, lat) => [((lon + 180) / 360) * n * 256 - x0 * 256, ((1 - mercY(lat) / Math.PI) / 2) * n * 256 - y0 * 256];
   const lonOf = (x) => ((x / 256 + x0) / n) * 360 - 180, latOf = (y) => Math.atan(Math.sinh(Math.PI * (1 - (2 * (y / 256 + y0)) / n))) / RAD;
@@ -431,11 +434,11 @@ function motifs({ elev, W, H, n, x0, y0 }, smooth) {
       if (sea / cnt > 0.08) continue;                       // keep motifs off the coasts
       const e = smooth(cx, cy), relief = hi - lo;
       // Thinned so the glyphs (wider than a cell) overlap in loose rows rather than a solid mass
-      if (e > 1800 && relief > 1300) { if (r3 < clamp((relief - 1300) / 2600, 0.3, 0.85)) out.push({ t: 'peak', lon: jl, lat: jt, e, s: 0.8 + 0.45 * Math.min(1, (hi - 1800) / 5000) + 0.4 * r3 }); }
-      else if (e > 250 && e < 3000 && relief > 380) { if (r3 < 0.42) out.push({ t: 'hill', lon: jl, lat: jt, e, s: 0.75 + 0.6 * r3 }); }
+      if (e > 1800 && relief > 1300 * q) { if (r3 < clamp((relief - 1300 * q) / (2600 * q), 0.3, 0.85)) out.push({ t: 'peak', lon: jl, lat: jt, e, s: 0.8 + 0.45 * Math.min(1, (hi - 1800) / 5000) + 0.4 * r3 }); }
+      else if (e > 250 && e < 3000 && relief > 380 * q) { if (r3 < 0.42) out.push({ t: 'hill', lon: jl, lat: jt, e, s: 0.75 + 0.6 * r3 }); }
       else if (e >= 3000) continue;                          // open plateau: leave it painted, unadorned
-      else if (e < 1500 && relief < 900) {
-        const dry = jl < 76 && jt > 23 ? 0.1 : 0.4;          // Thar and the dry north-west
+      else if (e < 1500 && relief < 900 * q) {
+        const dry = !opts.world && jl < 76 && jt > 23 ? 0.1 : 0.4;          // Thar and the dry north-west
         if (r3 < dry) out.push({ t: r1 < 0.28 ? 'cypress' : 'tree', lon: jl, lat: jt, e, s: 0.8 + 0.4 * r2 });
       }
     }
@@ -1118,8 +1121,8 @@ function wavePattern(k) {
     <path d="${row(h * 0.45, 0)} ${row(h * 0.95, a)}" fill="none" stroke="${C.wave}" stroke-opacity="0.5" stroke-width="${f1(1.1 * k)}" stroke-linecap="round"/></pattern>`;
 }
 // Painted motifs, drawn back to front, kept clear of the route, stops and furniture
-function paintMotifs(list, px, py, ts, discs, R, obstacles, kind = true) {
-  const pts = ROUTE.map(([lo, la]) => [px(lo), py(la)]);
+function paintMotifs(list, px, py, ts, discs, R, obstacles, kind = true, route = ROUTE) {
+  const pts = route.map(([lo, la]) => [px(lo), py(la)]);
   const clearR = 14 * ts, stopR = R * 2.4;
   const items = list.map((m) => ({ ...m, x: px(m.lon), y: py(m.lat) })).filter((m) => {
     const hw = 22 * ts * m.s;
@@ -1303,4 +1306,7 @@ export const kit = {
   C, STOPS, ROUTE, CHRONO, LEG_KM, LAND, RIVERS, EXTENT, RAD, mercY, latOfMerc, f1, esc, lerp, clamp, mixRGB,
   textWidth, FELL, FELL_I, FELL_SC, boxHit, haversineKm, ornamentRule, compassRose, sheetOpen, sheetClose,
   useStyle, styleColor, TITLE_FACES,
+  // for the any-place sheets (js/print-place.js)
+  mapFrame, rel_, paintMotifs,
+  styleNeatline: (FX, F, k) => (FX.frame === 'miniature' ? miniatureNeatline(F, k) : FX.frame === 'pichwai' ? pichwaiNeatline(F, k) : FX.frame === 'kalamkari' ? kalamkariNeatline(F, k) : null),
 };

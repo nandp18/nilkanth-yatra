@@ -140,3 +140,30 @@ body.busy .sheet svg { opacity: .3; filter: blur(2px) saturate(.6); }
   .sheet svg { width: auto; height: auto; }   /* fall back to the SVG's own inch dimensions */
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* ---------- any place: the journey / any-place switch, search, results, text fields ---------- */
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 999px; background: var(--soft); }
+.seg .chip { border-color: transparent; background: none; text-align: center; font-size: 13px; padding: 6px 12px; }
+.seg .chip.on { background: var(--ink); color: #fff; }
+.search { display: flex; gap: 6px; }
+.search input, .field {
+  flex: 1 1 auto; min-width: 0; width: 100%; height: 36px; padding: 0 12px; border: 1px solid var(--rule); border-radius: 10px;
+  background: #fff; color: var(--ink); font: 400 13px Inter, system-ui, sans-serif;
+}
+.field + .field { margin-top: 6px; }
+.search input:focus-visible, .field:focus-visible, .search button:focus-visible, .results button:focus-visible { outline: 2px solid var(--saffron); outline-offset: 1px; }
+.search button {
+  flex: none; height: 36px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--ink); background: var(--ink); color: #fff;
+  cursor: pointer; font: 500 13px Inter, system-ui, sans-serif;
+}
+.search button:disabled { opacity: .5; cursor: progress; }
+.results { list-style: none; margin: 8px 0 0; padding: 4px; border: 1px solid var(--rule); border-radius: 10px; }
+.results button {
+  display: block; width: 100%; padding: 7px 8px; border: 0; border-radius: 7px; background: none; text-align: left; cursor: pointer;
+  font: inherit; color: inherit;
+}
+.results button:hover { background: var(--soft); }
+.results b { display: block; font-weight: 600; font-size: 13px; }
+.results span { display: block; font-size: 11.5px; line-height: 1.35; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field-note { margin: 8px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.field-note a { color: inherit; }
