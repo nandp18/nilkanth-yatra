@@ -102,6 +102,7 @@ const STEPS = {
   'Engraving relief': (p) => (p < 0.85 ? 'Fetching elevation tiles · quicker once cached' : 'Shading the mountains and coasts'),
   'Reading elevations': () => 'Fetching elevation tiles · quicker once cached',
   'Tracing the coast': () => 'Finding the shoreline, rivers and towns',
+  'Gathering map detail': () => 'Roads, rivers and towns from OpenStreetMap',
   'Drawing the panorama': () => 'Ray-casting the view north to the Himalaya',
 };
 const stepFor = (label, p) => (STEPS[label] || (() => ''))(p);

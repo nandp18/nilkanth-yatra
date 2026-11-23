@@ -63,6 +63,13 @@ Formats are **11 × 14 in** (`?size=11x14`), **11 × 17 in** (tabloid, `?size=11
 
 The 24 × 36 in poster engraves its relief from twice-as-detailed tiles (about 270 dpi). The title face can be Didone (the default), Garamond, Copperplate or Fell.
 
+**Any place.** Switch the panel to *Any place* to chart wherever you like in the same styles: search a place (OpenStreetMap's Nominatim) or type `lat, lon`, then pick the distance across (25 km to 3,000 km). The relief comes from the same elevation tiles, and the coast is traced from them at sea level. Up to 300 km across, the sheet adds detail from OpenStreetMap through OpenFreeMap's vector tiles, more of it the closer you zoom:
+- **25 km**: the street grid, streams, lakes, suburbs and neighbourhoods.
+- **100 km**: main roads, railways, rivers and towns.
+- **300 km**: motorways, rivers and cities.
+
+Wider views take rivers, lakes and towns from Natural Earth, and so does any sheet whose tiles can't be reached. Gentle country such as a coastal plain gets its hillshade exaggerated (up to 6×) so valleys and ridges still read; mountains keep the usual setting.
+
 **Choosing a design.** The side panel shows every style and layout as a live thumbnail of the real map. Click one, or use the arrow keys. The address bar updates as you choose, so a design can be shared as a link.
 
 To get a file: **Print / Save PDF** (set margins to *None* and turn on *Background graphics*), or **Download SVG**. The SVG has its fonts embedded, so a print shop sees exactly what you see. The sheet is framed by default. The **Border** choice makes it borderless (`?border=off`): the Map, Footprints, Detail and Any place sheets then run the map to the edge of the sheet with no neatline, and the poster layouts (Classic, Line and the rest) keep their paper margins without the frame. **Download** offers SVG, JPG and TIFF. JPG and TIFF render the sheet at 300 dpi (uncompressed 8-bit RGB TIFF, JPEG with its dpi set). Very large sheets drop to the highest dpi that stays under about 60 megapixels, so 24 × 36 in renders at about 263 dpi.
@@ -88,6 +95,9 @@ js/
   chronology.js       estimated date for each stop
   print.js            print edition renderer: styles, relief, Classic / Map / Detail sheets
   print-views.js      the other print views: Strip, Profile, Panorama, Ridgelines, Tirtha pata, Mandala, Line
+  print-place.js      Any place sheets: extent, traced coast, relief exaggeration, layout
+  print-osm.js        OpenStreetMap detail for Any place, from OpenFreeMap vector tiles (decoder included)
+  print-export.js     JPG and TIFF export
   data/
     stops.js          the 65 tirths, cities, map labels
     skydata.js        generated: star catalog       (npm run build:sky)
@@ -109,6 +119,6 @@ tools/                data generators
 - [MapLibre GL JS](https://maplibre.org/) 5.24 for the 3D terrain, hillshade and `color-relief` elevation coloring
 - [maplibre-contour](https://github.com/onthegomap/maplibre-contour), which generates contour lines on the fly from the DEM
 - AWS/Mapzen Terrarium tiles for elevation (including sea depths), OpenFreeMap vector tiles for water, rivers and borders, and Esri World Imagery for the satellite style
-- Coastlines and rivers for the print edition come from [Natural Earth](https://www.naturalearthdata.com/) (public domain).
+- Coastlines and rivers for the print edition come from [Natural Earth](https://www.naturalearthdata.com/) (public domain). Any place sheets up to 300 km across add roads, railways, rivers, lakes and towns from [OpenStreetMap](https://www.openstreetmap.org/copyright) (© OpenStreetMap contributors, ODbL) through [OpenFreeMap](https://openfreemap.org/) and [OpenMapTiles](https://openmaptiles.org/), credited on the sheet.
 - Star catalog, constellation lines and Milky Way contours come from [d3-celestial](https://github.com/ofrohn/d3-celestial) (BSD-3). Rebuild them with `node tools/build-sky.mjs`.
 - Stop data lives in `js/data/stops.js`. Coordinates are best-effort identifications, and uncertain ones are flagged `approx`.

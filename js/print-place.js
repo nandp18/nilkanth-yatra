@@ -1,8 +1,11 @@
 // Print edition: a chart of any place, in the same styles as the journey's map.
 // Give it a point and a distance across; it engraves the relief from the same elevation
-// tiles, traces the coast from them (sea level), and adds rivers, lakes and towns from
-// Natural Earth, fetched on demand. Units match print.js: hundredths of an inch.
+// tiles and traces the coast from them (sea level). Up to 300 km across it adds roads,
+// railways, rivers, lakes and towns from OpenStreetMap (js/print-osm.js); wider views, or
+// any view when those tiles can't be reached, take rivers, lakes and towns from Natural
+// Earth. Everything is fetched on demand. Units match print.js: hundredths of an inch.
 import { kit, relief, elevationData, elevationSampler, tileCount } from './print.js';
+import { osmPlan, osmDetail } from './print-osm.js';
 
 const {
   C, RAD, mercY, latOfMerc, f1, esc, clamp, textWidth, FELL_I, boxHit, ornamentRule, compassRose,
@@ -88,14 +91,22 @@ function coastline(data) {
   const lonOf = (gx) => ((((gx - 0.5) * s) / 256 + x0) / n) * 360 - 180;
   const latOf = (gy) => Math.atan(Math.sinh(Math.PI * (1 - (2 * (((gy - 0.5) * s) / 256 + y0)) / n))) / RAD;
   const rings = [];
+  // Enclosed water smaller than this (grid cells²) is a marsh pool or a bad elevation pixel,
+  // not a lake: dropping it leaves the land whole. Real lakes come from the map data.
+  const minHole = Math.max(6, gw * gh * 2e-5);
   while (next.size) {
     const start = next.keys().next().value, pts = [];
     let e = start;
     do { pts.push(point(e)); const to = next.get(e); next.delete(e); e = to; } while (e !== undefined && e !== start);
     if (pts.length < 4) continue;
-    let ax = Infinity, bx = -Infinity, ay = Infinity, by = -Infinity;
-    for (const [x, y] of pts) { if (x < ax) ax = x; if (x > bx) bx = x; if (y < ay) ay = y; if (y > by) by = y; }
+    let ax = Infinity, bx = -Infinity, ay = Infinity, by = -Infinity, area = 0;
+    for (let i = 0, [px0, py0] = pts[pts.length - 1]; i < pts.length; i++) {
+      const [x, y] = pts[i];
+      if (x < ax) ax = x; if (x > bx) bx = x; if (y < ay) ay = y; if (y > by) by = y;
+      area += px0 * y - x * py0; [px0, py0] = [x, y];
+    }
     if (bx - ax < 1.2 && by - ay < 1.2) continue;          // specks
+    if (area < 0 && -area / 2 < minHole) continue;          // land is on the right, so enclosed water winds negative
     const mid = pts.length >> 1;
     const simple = [...simplify(pts.slice(0, mid + 1), 0.3), ...simplify(pts.slice(mid), 0.3).slice(1)];
     const flat = [];
@@ -130,7 +141,20 @@ const ne = (file) => (neCache[file] ||= fetch(`${NE}${file}.geojson`).then((r) =
 const lineParts = (g) => (!g ? [] : g.type === 'LineString' ? [g.coordinates] : g.type === 'MultiLineString' ? g.coordinates : []);
 const polyParts = (g) => (!g ? [] : g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : []);
 
+const NONE = { streams: [], water: [], roads: {}, rail: [], osm: false };
 async function vectors(ext, pad, wantTowns) {
+  const dLon = ext.lon1 - ext.lon0;
+  const km = dLon * 111.32 * Math.cos(((ext.lat0 + ext.lat1) / 2) * RAD), plan = osmPlan(km);
+  if (plan) {
+    try {
+      const o = await osmDetail(ext, pad, km, plan);
+      return { osm: true, rivers: [...(o.waterways.river || []), ...(o.waterways.canal || [])], streams: o.waterways.stream || [],
+        lakes: [], water: o.water, roads: o.roads, rail: o.rail, towns: wantTowns ? o.places.slice(0, 80) : [] };
+    } catch (err) { console.warn('OpenStreetMap detail unavailable; drawing from Natural Earth', err); }
+  }
+  return { ...NONE, ...(await naturalEarth(ext, pad, wantTowns)) };
+}
+async function naturalEarth(ext, pad, wantTowns) {
   const dLon = ext.lon1 - ext.lon0;
   // Natural Earth is drawn for small scales: below about 80 km across its rivers would wander off the valleys
   const res = dLon >= 6 ? '50m' : dLon >= 0.8 ? '10m' : null;
@@ -167,18 +191,41 @@ async function vectors(ext, pad, wantTowns) {
 // place: { lat, lon, title, sub }; opts: { span (a SPANS key), towns, progress, alive }
 export async function drawPlace(fmt, faceKey, styleKey, place, { span = 300, towns = true, progress, alive = () => true } = {}) {
   const ext = placeExtent(fmt, place.lat, place.lon, SPANS[span].km), pad = padExtent(ext), z = placeZoom(fmt, ext, pad);
-  const opts = { zf: +clamp(3.1 * 0.8 ** (z - 7), 1, 3.1).toFixed(2), motifStep: r4((ext.lon1 - ext.lon0) / 72), world: true };
   const vec = vectors(ext, pad, towns);                    // alongside the tiles
-  const rel = await relief(z, pad, styleKey, progress?.('Engraving relief'), opts);
+  vec.catch(() => {});                                     // handled where it's awaited
+  const engraving = progress?.('Engraving relief');
+  const data = await elevationData(z, pad, (p) => engraving?.(0.85 * p));
   if (!alive()) return null;
-  const data = await elevationData(z, pad);
+  const opts = { zf: exaggeration(data, z), motifStep: r4((ext.lon1 - ext.lon0) / 72), world: true };
+  const rel = await relief(z, pad, styleKey, engraving, opts);
+  if (!alive()) return null;
   progress?.('Tracing the coast')(0.5);
   await new Promise((r) => setTimeout(r));
   const sample = elevationSampler(data);
-  const geo = { land: coastline(data), landAt: (lon, lat) => sample(lon, lat) > 0.5, ...(await vec) };
+  const land = coastline(data);
+  progress?.('Gathering map detail')(0.9);
+  const geo = { land, landAt: (lon, lat) => sample(lon, lat) > 0.5, ...(await vec) };
   await document.fonts.ready;
   if (!alive()) return null;
   return buildPlace(fmt, faceKey, styleKey, rel, ext, place, geo);
+}
+
+// Vertical exaggeration of the hillshade. Steep country keeps the usual setting for its zoom;
+// gentle country (a coastal plain, the prairie) is lifted until its valleys and ridges read,
+// judged by the slope that a quarter of the land exceeds, up to 6×.
+function exaggeration({ elev, W, H, n, y0 }, z) {
+  const base = clamp(3.1 * 0.8 ** (z - 7), 1, 3.1), step = Math.max(2, Math.round(Math.sqrt((W * H) / 60000))), g = [];
+  for (let j = 1; j < H - 1; j += step) {
+    const lat = Math.atan(Math.sinh(Math.PI * (1 - (2 * (y0 + j / 256)) / n))) / RAD, cell = (40075016 * Math.cos(lat * RAD)) / (256 * n);
+    for (let i = 1, o = j * W; i < W - 1; i += step) {
+      if (elev[o + i] <= 1) continue;                      // the sea and the shore
+      g.push(Math.hypot(elev[o + i + 1] - elev[o + i - 1], elev[o + i + W] - elev[o + i - W]) / (2 * cell));
+    }
+  }
+  if (g.length < 100) return +base.toFixed(2);
+  g.sort((a, b) => a - b);
+  const p75 = g[Math.floor(g.length * 0.75)];
+  return +clamp(p75 > 0 ? 0.2 / p75 : 6, base, 6).toFixed(2);
 }
 
 const dm = (v, pos, neg) => {
@@ -213,9 +260,19 @@ export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo) 
     for (let i = 0; i < flat.length; i += 2) d += `${i ? 'L' : 'M'}${f1(px(flat[i]))},${f1(py(flat[i + 1]))}`;
     return close ? d + 'Z' : d;
   };
+  const lines = (list = []) => list.map((r) => pathOf(r, false)).join('');
   const land = geo.land.map((r) => pathOf(r, true)).join('');
-  const rivers = geo.rivers.map((r) => pathOf(r, false)).join('');
+  const rivers = lines(geo.rivers), streams = lines(geo.streams);
   const lakes = geo.lakes.map((poly) => poly.map((r) => pathOf(r, true)).join('')).join('');
+  // OpenStreetMap water: filled only, since tile edges cut through the polygons
+  const water = (geo.water || []).map((poly) => poly.map((r) => pathOf(r, true)).join('')).join('');
+  // Roads, finest first, as engraved lines; motorways and trunk roads cased as double lines
+  const ROADS = [['minor', 0.45, 0.32], ['tertiary', 0.6, 0.48], ['secondary', 0.8, 0.6], ['primary', 1.15, 0.75]];
+  const road = (w, o) => `fill="none" stroke="${C.ink}" stroke-width="${f1(w * k)}" stroke-opacity="${o}" stroke-linejoin="round" stroke-linecap="round"`;
+  let roads = ROADS.map(([c, w, o]) => { const d = lines(geo.roads?.[c]); return d ? `<path d="${d}" ${road(w, o)}/>` : ''; }).join('');
+  const major = lines(geo.roads?.motorway) + lines(geo.roads?.trunk), rail = lines(geo.rail);
+  if (rail) roads += `<use href="#railp" ${road(1.7, 0.85)}/><use href="#railp" fill="none" stroke="${C.paper}" stroke-width="${f1(0.8 * k)}" stroke-dasharray="${f1(6 * k)} ${f1(6 * k)}"/>`;
+  if (major) roads += `<use href="#majorp" ${road(2.6, 0.85)}/><use href="#majorp" fill="none" stroke="${C.paper}" stroke-width="${f1(1.2 * k)}" stroke-linejoin="round" stroke-linecap="round"/>`;
   const R = 11.5 * ts, mx = px(place.lon), my = py(place.lat);
 
   // --- cartouche: sized to the title, set in the corner with the least land under it; the rose takes another ---
@@ -340,7 +397,9 @@ export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo) 
     <text class="subtitle" x="${f1(cx)}" y="${f1(ySub)}" style="font-size:${sSize}px">${esc(sub)}</text>
     ${ornamentRule(cx, ySub + fs(18), fs(150), ts)}
     <text class="facts" x="${f1(cx)}" y="${f1(yFacts)}" style="font-size:${fs(17)}px;letter-spacing:${fs(4)}px">${dm(place.lat, 'N', 'S')} · ${dm(place.lon, 'E', 'W')}</text>
-    <text class="credit" x="${f1(cx)}" y="${f1(cart.y + cart.h - fs(22))}" text-anchor="middle" style="font-size:${fs(11)}px">Relief: Mapzen Terrain Tiles · Rivers, lakes &amp; towns: Natural Earth</text>`;
+    <text class="credit" x="${f1(cx)}" y="${f1(cart.y + cart.h - fs(22))}" text-anchor="middle" style="font-size:${fs(11)}px">${geo.osm
+    ? 'Relief: Mapzen · OpenFreeMap © OpenMapTiles · Data © OpenStreetMap contributors'
+    : 'Relief: Mapzen Terrain Tiles · Rivers, lakes &amp; towns: Natural Earth'}</text>`;
 
   const rel = rel_(reliefData, px, py);
   const frameRect = `x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}"`;
@@ -348,6 +407,7 @@ export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo) 
 
   return `${sheetOpen(fmt, W, H, k, ts, fs, face, FX, `<clipPath id="frame"><rect ${frameRect}/></clipPath>
     <path id="landp" d="${land}"/>
+    ${major ? `<path id="majorp" d="${major}"/>` : ''}${rail ? `<path id="railp" d="${rail}"/>` : ''}
     <clipPath id="land"><use href="#landp"/></clipPath>`)}
 
   <g clip-path="url(#frame)">
@@ -360,8 +420,11 @@ export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo) 
       <use href="#landp" fill="none" stroke="${C.ink3}" stroke-width="${f1(16 * k)}" stroke-opacity="0.32" filter="url(#bleed)"/>` : ''}
     </g>
     <path d="${grat}" fill="none" stroke="${C.ink}" stroke-opacity="${FX.grat}" stroke-width="${f1(0.8 * k)}"/>
+    ${water ? `<path d="${water}" fill="${C.sea}"/>` : ''}
+    ${streams ? `<path d="${streams}" fill="none" stroke="${C.water}" stroke-width="${f1(0.8 * k)}" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round"/>` : ''}
     <path d="${rivers}" fill="none" stroke="${C.water}" stroke-width="${f1(1.5 * k)}" stroke-opacity="0.9" stroke-linejoin="round" stroke-linecap="round"/>
     ${lakes ? `<path d="${lakes}" fill="${C.sea}" fill-rule="evenodd" stroke="${C.ink}" stroke-width="${f1(1 * k)}" stroke-linejoin="round"/>` : ''}
+    ${roads}
     <use href="#landp" fill="none" stroke="${C.ink}" stroke-width="${f1(1.6 * k)}" stroke-linejoin="round"/>
     ${motifSvg}
     ${dots}
