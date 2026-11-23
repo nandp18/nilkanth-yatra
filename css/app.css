@@ -216,7 +216,7 @@ input[type=range].thin::-moz-range-thumb { width: 10px; height: 10px; border-rad
   font: 600 calc(var(--ms) * .5)/1 var(--sans); letter-spacing: -.02em;
   background: #fff; color: #6b6359; border: 1.25px solid #a89f92;
   box-shadow: 0 1px 2px rgba(30,26,22,.18), 0 2px 6px rgba(30,26,22,.10);
-  transition: background .35s, color .35s, border-color .35s, transform .3s var(--ease), width .3s, height .3s;
+  transition: background .35s, color .35s, border-color .35s, transform .3s var(--ease);
 }
 .stop-marker.visited .disc { background: var(--gold); border-color: #c4950f; color: var(--ink); animation: pop .45s var(--ease); }
 .stop-marker.active .disc { background: var(--ink); color: var(--gold); border-color: #fff; border-width: 1.5px; transform: scale(1.4); }

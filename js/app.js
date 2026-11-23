@@ -1087,11 +1087,23 @@ let mapW = 0, mapH = 0;
 new ResizeObserver(() => { ({ width: mapW, height: mapH } = container.getBoundingClientRect()); }).observe(container);
 
 // Park markers that can't be seen: areas (overview only) once zoomed in, cities
-// in the overview, and stops well outside the view. The margin covers how far the
-// camera can travel between two checks (~160 ms), so nothing pops in at the edge.
+// in the overview, and stops outside the view. The margin is how far the view will
+// move (pan, or zoom out, which pulls the edges in) before the next check ~160 ms on,
+// judged by its speed since the last one: wide while flying, a hair when at rest. So a
+// parked marker never pops in at the edge, and few off-screen ones are re-placed per frame.
+let lastCull = null;
 function cull() {
   const far = zBand === 'z-far';
-  const mx = mapW * 0.35 + 80, my = mapH * 0.35 + 80;
+  const now = performance.now(), z = map.getZoom(), half = Math.hypot(mapW, mapH) / 2;
+  let speed = 0;                                          // px per ms
+  if (lastCull) {
+    const p = map.project(lastCull.ll);
+    speed = (Math.hypot(p.x - mapW / 2, p.y - mapH / 2) + half * Math.abs(2 ** (z - lastCull.z) - 1)) / Math.max(16, now - lastCull.t);
+  }
+  lastCull = { ll: map.getCenter(), z, t: now };
+  const still = !camera.busy && !map.isMoving();          // the check made as the view comes to rest
+  const pad = still ? 48 : Math.min(160 + 250 * speed, Math.max(mapW, mapH) * 0.35 + 80);
+  const mx = pad, my = pad;
   for (const c of cullable) {
     let hide = lookMode ? false : c.kind === 'area' ? !far : c.kind === 'city' ? far : false;
     if (!hide && !far && !lookMode && mapW) {

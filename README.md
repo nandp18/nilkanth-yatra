@@ -32,7 +32,7 @@ The middle dates are **estimates** (shown with ≈). They spread the seven years
 - compass rose and scale bar
 - the 65 tirths keyed in the Indian Ocean, as on the original map
 
-Eight map styles, each with its own relief, palette and paper (`STYLES` in `js/print.js`; open one directly with `print.html?style=night`):
+Eleven map styles, each with its own relief, palette and paper (`STYLES` in `js/print.js`; open one directly with `print.html?style=night`):
 - **Antique** (default): the engraved sepia chart.
 - **Natural**: natural-colour shaded relief, after Tom Patterson's National Park Service maps.
 - **Watercolor**: soft pigment washes with pooled edges on cold-press paper, after Molly O'Halloran.
@@ -41,6 +41,7 @@ Eight map styles, each with its own relief, palette and paper (`STYLES` in `js/p
 - **Pahari**: painted like a Kangra/Pahari miniature. It has flat, outlined grounds, little snow-capped peaks, hillocks and trees placed from the real terrain, rippled water, and a lapis band on a gold-flecked pink margin.
 - **Pichwai**: gold on indigo, after the Nathdwara temple hangings. Lotus ponds fill the sea, kadamba trees and cows sit on the land, and a red border carries a gold vine.
 - **Kalamkari**: the pen-drawn temple cloths of Srikalahasti. Madder, indigo and mustard on unbleached cotton, with rock pinnacles, trees of life and peacocks on the land, curling waves and fish in the sea, and a paisley border.
+- **Gazetteer**, **City plan** and **Ward map**: the 1890s American city plans. Gazetteer is fine brown ink on cream with pale blue water, after the pocket-atlas maps. City plan has a mustard land wash, green parks and blue water, after Matthews-Northrup. Ward map is black ink on cream with bold red district lines, after Rand McNally. Land is a flat tint with only a touch of shadow on steep ground. They come into their own on an **Any place** sheet of a city (10 or 25 km across), which adds parks and cemeteries, county and township lines, river names spaced out along the stream, an *Explanation* of the symbols, and an A–Z / 1–n index round the border. The Ward map also draws ward and neighbourhood lines where OpenStreetMap has them.
 
 Eleven layouts. Every one works in every style and at every size:
 - **Classic**: title block, map, numbered key, legend and a chronicle timeline.
@@ -63,9 +64,16 @@ Formats are **11 × 14 in** (`?size=11x14`), **11 × 17 in** (tabloid, `?size=11
 
 The 24 × 36 in poster engraves its relief from twice-as-detailed tiles (about 270 dpi). The title face can be Didone (the default), Garamond, Copperplate or Fell.
 
+**Any place.** Switch the panel to *Any place* to chart wherever you like in the same styles: search a place (OpenStreetMap's Nominatim) or type `lat, lon`, then pick the distance across (10 km to 3,000 km). The relief comes from the same elevation tiles, and the coast is traced from them at sea level. Up to 300 km across, the sheet adds detail from OpenStreetMap through OpenFreeMap's vector tiles, more of it the closer you zoom:
+- **10 and 25 km**: the street grid, streams, lakes, parks, suburbs and neighbourhoods.
+- **100 km**: main roads, railways, rivers and towns.
+- **300 km**: motorways, rivers and cities.
+
+Wider views take rivers, lakes and towns from Natural Earth, and so does any sheet whose tiles can't be reached. Gentle country such as a coastal plain gets its hillshade exaggerated (up to 6×) so valleys and ridges still read; mountains keep the usual setting.
+
 **Choosing a design.** The side panel shows every style and layout as a live thumbnail of the real map. Click one, or use the arrow keys. The address bar updates as you choose, so a design can be shared as a link.
 
-To get a file: **Print / Save PDF** (set margins to *None* and turn on *Background graphics*), or **Download SVG**. The SVG has its fonts embedded, so a print shop sees exactly what you see. The sheet is framed by default. The **Border** choice makes it borderless (`?border=off`), for a print with no frame. **Download JPG** and **Download TIFF** render the sheet at 300 dpi (uncompressed 8-bit RGB TIFF, JPEG with its dpi set). Very large sheets drop to the highest dpi that stays under about 60 megapixels, so 24 × 36 in renders at about 263 dpi.
+To get a file: **Print / Save PDF** (set margins to *None* and turn on *Background graphics*), or **Download SVG**. The SVG has its fonts embedded, so a print shop sees exactly what you see. The sheet is framed by default. The **Border** choice makes it borderless (`?border=off`): the Map, Footprints, Detail and Any place sheets then run the map to the edge of the sheet with no neatline, and the poster layouts (Classic, Line and the rest) keep their paper margins without the frame. **Download** offers SVG, JPG and TIFF. JPG and TIFF render the sheet at 300 dpi (uncompressed 8-bit RGB TIFF, JPEG with its dpi set). Very large sheets drop to the highest dpi that stays under about 60 megapixels, so 24 × 36 in renders at about 263 dpi.
 
 ## Run
 
@@ -88,6 +96,9 @@ js/
   chronology.js       estimated date for each stop
   print.js            print edition renderer: styles, relief, Classic / Map / Detail sheets
   print-views.js      the other print views: Strip, Profile, Panorama, Ridgelines, Tirtha pata, Mandala, Line
+  print-place.js      Any place sheets: extent, traced coast, relief exaggeration, layout
+  print-osm.js        OpenStreetMap detail for Any place, from OpenFreeMap vector tiles (decoder included)
+  print-export.js     JPG and TIFF export
   data/
     stops.js          the 65 tirths, cities, map labels
     skydata.js        generated: star catalog       (npm run build:sky)
@@ -109,6 +120,6 @@ tools/                data generators
 - [MapLibre GL JS](https://maplibre.org/) 5.24 for the 3D terrain, hillshade and `color-relief` elevation coloring
 - [maplibre-contour](https://github.com/onthegomap/maplibre-contour), which generates contour lines on the fly from the DEM
 - AWS/Mapzen Terrarium tiles for elevation (including sea depths), OpenFreeMap vector tiles for water, rivers and borders, and Esri World Imagery for the satellite style
-- Coastlines and rivers for the print edition come from [Natural Earth](https://www.naturalearthdata.com/) (public domain).
+- Coastlines and rivers for the print edition come from [Natural Earth](https://www.naturalearthdata.com/) (public domain). Any place sheets up to 300 km across add roads, railways, rivers, lakes and towns from [OpenStreetMap](https://www.openstreetmap.org/copyright) (© OpenStreetMap contributors, ODbL) through [OpenFreeMap](https://openfreemap.org/) and [OpenMapTiles](https://openmaptiles.org/), credited on the sheet.
 - Star catalog, constellation lines and Milky Way contours come from [d3-celestial](https://github.com/ofrohn/d3-celestial) (BSD-3). Rebuild them with `node tools/build-sky.mjs`.
 - Stop data lives in `js/data/stops.js`. Coordinates are best-effort identifications, and uncertain ones are flagged `approx`.

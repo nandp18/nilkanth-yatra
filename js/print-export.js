@@ -44,8 +44,7 @@ export async function jpegBlob(canvas, dpi) {
 
 // Uncompressed baseline TIFF, little-endian, 8 bits per channel RGB, one strip, dpi in the tags
 export function tiffBlob(canvas, dpi) {
-  const W = canvas.width, H = canvas.height;
-  const px = canvas.getContext('2d').getImageData(0, 0, W, H).data;
+  const W = canvas.width, H = canvas.height, ctx = canvas.getContext('2d');
   const pixels = W * H * 3;
   // Layout: 8-byte header, IFD (2 + TAGS × 12 + 4 bytes), then the out-of-line values, then pixels
   const TAGS = 13, IFD = 8, EXTRA = IFD + 2 + TAGS * 12 + 4;
@@ -88,8 +87,11 @@ export function tiffBlob(canvas, dpi) {
   dv.setUint32(XRES, dpi, true); dv.setUint32(XRES + 4, 1, true);
   dv.setUint32(YRES, dpi, true); dv.setUint32(YRES + 4, 1, true);
 
-  for (let i = 0, j = DATA, n = W * H * 4; i < n; i += 4) {
-    out[j++] = px[i]; out[j++] = px[i + 1]; out[j++] = px[i + 2];
+  // Read the canvas in bands of rows, so a large sheet never holds a second full RGBA copy
+  const BAND = 256;
+  for (let y = 0, j = DATA; y < H; y += BAND) {
+    const px = ctx.getImageData(0, y, W, Math.min(BAND, H - y)).data;
+    for (let i = 0; i < px.length; i += 4) { out[j++] = px[i]; out[j++] = px[i + 1]; out[j++] = px[i + 2]; }
   }
   return new Blob([buf], { type: 'image/tiff' });
 }

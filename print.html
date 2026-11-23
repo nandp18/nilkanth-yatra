@@ -13,10 +13,15 @@
   <header class="toolbar">
     <a href="./" class="back">← Back to the map</a>
     <span class="busy-pill" id="busy-pill">Drawing…</span><span class="summary" id="summary"></span>
-    <button id="btn-svg" class="ghost" disabled>Download SVG</button>
-    <button id="btn-jpg" class="ghost" disabled title="300 dpi JPEG, for print shops and sharing">Download JPG</button>
-    <button id="btn-tiff" class="ghost" disabled title="300 dpi uncompressed TIFF, for print shops">Download TIFF</button>
-    <button id="btn-print" class="primary" disabled>Print / Save PDF</button>
+    <details class="menu" id="download">
+      <summary>Download</summary>
+      <div class="menu-list">
+        <button id="btn-svg" disabled><b>SVG</b><span>Vector, fonts embedded</span></button>
+        <button id="btn-jpg" disabled><b>JPG</b><span>Image at up to 300 dpi</span></button>
+        <button id="btn-tiff" disabled><b>TIFF</b><span>Uncompressed, up to 300 dpi, for print shops</span></button>
+      </div>
+    </details>
+    <button id="btn-print" class="primary" disabled>Print<span class="wide"> / Save PDF</span></button>
   </header>
 
   <div class="studio">

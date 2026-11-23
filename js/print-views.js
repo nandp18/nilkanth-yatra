@@ -7,7 +7,7 @@
 //   Strip     road-book strips (after Ogilby): the route cut into twelve panels, each turned to run up the page
 //   Panorama  a bird's-eye view from over the Indian Ocean, looking north to the Himalaya
 // Units match print.js: hundredths of an inch, with type scaled to the sheet (ts = W / 1800).
-import { kit } from './print.js';
+import { kit, due, pause } from './print.js';
 import { REGIONS, REGION_SHORT } from './data/stops.js';
 
 const {
@@ -87,7 +87,7 @@ const legend = (x, y, fs, ts, items) => {
   for (const [kind, label] of items) {
     if (kind === 'route') { g += `<line x1="${cx}" y1="0" x2="${f1(cx + fs(56))}" y2="0" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}"/>`; cx += fs(68); }
     else { const R = 11.5 * ts; g += `<circle cx="${f1(cx + R)}" cy="0" r="${f1(R)}" fill="${kind === 'end' ? C.red : C.key}" stroke="${C.ink}" stroke-width="${f1(1.4 * ts)}"/>`; cx += R * 2 + fs(10); }
-    g += `<text class="legend" x="${f1(cx)}" y="${fs(6)}" style="font-size:${fs(19)}px">${label}</text>`;
+    g += `<text class="legend" x="${f1(cx)}" y="${fs(6)}" style="font-size:${fs(19)}px">${esc(label)}</text>`;
     cx += textWidth(label, FELL_I, fs(19)) + fs(46);
   }
   return { svg: g + '</g>', width: cx - fs(46) };
@@ -152,7 +152,7 @@ export function buildLine(fmt, faceKey, styleKey) {
 // =====================================================================
 export function buildRidges(fmt, faceKey, styleKey, sample) {
   const E = setup(fmt, faceKey, styleKey), { W, H, k, ts, fs, face, FX } = E;
-  const framed = !!FX.frame;                       // painted styles keep their borders
+  const framed = !!FX.frame && fmt.border !== false;   // painted styles keep their borders, unless borderless
   const M = (framed ? 150 : 130) * k, foot = fs(340);
   const F = { x: M, y: M + fs(70), w: W - 2 * M, h: H - 2 * M - foot - fs(70) };
   const lon0 = 67.4, lon1 = 97.4, m0 = mercY(6.4), m1 = mercY(33.6);
@@ -545,7 +545,7 @@ async function renderPanorama(data, texHref, SW, SH, pal, onProgress) {
       ybuf[sx] = sy;
     }
     z += dz; dz *= 1.0028;
-    if (++step % 60 === 0) { onProgress?.(clamp((z - zNear * 0.86) / (zFar * 1.06 - zNear * 0.86), 0, 1)); await new Promise((r) => setTimeout(r)); }
+    if (++step % 8 === 0 && due()) { onProgress?.(clamp((z - zNear * 0.86) / (zFar * 1.06 - zNear * 0.86), 0, 1)); await pause(); }
   }
   const cv = new OffscreenCanvas(SW, SH);
   cv.getContext('2d').putImageData(img, 0, 0);
@@ -652,7 +652,7 @@ const isFramed = (FX) => !!FX.frame;
 // =====================================================================
 export function buildScroll(fmt, faceKey, styleKey, sample) {
   const E = setup(fmt, faceKey, styleKey), { W, H, k, ts, fs, face, FX } = E;
-  const framed = isFramed(FX), M = (framed ? 150 : 120) * k;
+  const framed = isFramed(FX) && fmt.border !== false, M = (framed ? 150 : 120) * k;
   const head = header(E, M - fs(20), 'A pilgrim’s scroll of the sixty-five tirths', FACTS, 0.78);
   const tint = regionTints();
   const per = 8, rows = Math.ceil(STOPS.length / per);
@@ -780,7 +780,7 @@ export function buildScroll(fmt, faceKey, styleKey, sample) {
 // =====================================================================
 export function buildMandala(fmt, faceKey, styleKey) {
   const E = setup(fmt, faceKey, styleKey), { W, H, k, ts, fs, face, FX } = E;
-  const framed = isFramed(FX), M = (framed ? 150 : 120) * k, foot = fs(330);
+  const framed = isFramed(FX) && fmt.border !== false, M = (framed ? 150 : 120) * k, foot = fs(330);
   const cx = W / 2, Rmax = Math.min(W / 2 - M, (H - foot - 2 * M) / 2) - fs(10);
   const blockH = 2 * Rmax + fs(70) + fs(130 * face.scale) + fs(70), cy = Math.max(M + fs(10), (H - blockH) / 2) + Rmax;
   const nameBand = fs(150), R5 = Rmax - nameBand;                  // petals reach R5

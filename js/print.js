@@ -157,6 +157,37 @@ export const STYLES = {
     fx: { mottle: [0.5, 0.38, 0.2, 0.5, -0.16], grain: [0.35, 0.25, 0.15, 0.6, -0.14], grainOpacity: 0.4,
       vignette: ['#6b3a1a', 0.3], waterLines: 0.4, grat: 0, motifs: 'kalamkari', waves: 'kalamkari', frame: 'kalamkari' },
   },
+  // The 1890s city plans of the American atlas houses. Land is a flat tint, with no hill
+  // shading, only a touch of shadow on steep ground. On an Any place sheet they add parks and
+  // cemeteries, district lines, river names spaced out along the stream, an Explanation and an
+  // A–Z / 1–n index round the border. `period` turns those on (js/print-place.js).
+  gazetteer: {
+    label: 'Gazetteer', note: 'Fine brown ink on cream, pale blue water, after the 1890s pocket-atlas city maps',
+    C: { ink: '#3b2c20', ink2: '#54402f', ink3: '#5e4632', ink4: '#7a6450', red: '#8a2a1a', water: '#46717c',
+      paper: '#f0e4c6', sea: '#bed6d3', seaLine: '#bed6d3', key: '#f3e9cf', shore: '#46717c', park: '#cfd3a8' },
+    ramp: [[0, [239, 226, 194]], [6600, [239, 226, 194]]],
+    tone: (c, hs) => { const s = 1 - 0.5 * Math.max(0, 0.62 - hs); return [c[0] * s, c[1] * s, c[2] * s]; },
+    fx: { mottle: [0.42, 0.3, 0.16, 0.28, -0.18], grain: [0.3, 0.22, 0.12, 0.5, -0.14], grainOpacity: 0.3,
+      vignette: ['#6b4a22', 0.22], waterLines: 0.25, grat: 0, period: 'New map of' },
+  },
+  cityplan: {
+    label: 'City plan', note: 'Mustard wash, green parks and blue water, after the 1890s Matthews-Northrup city plans',
+    C: { ink: '#1d1a16', ink2: '#3a332a', ink3: '#4a3e2e', ink4: '#6a5d4a', red: '#a02a1c', water: '#2c5c78',
+      paper: '#f1e7c9', sea: '#9cc0cd', seaLine: '#9cc0cd', key: '#f4ead0', shore: '#2c5c78', park: '#8fa968', bound: '#b4553f' },
+    ramp: [[0, [232, 212, 140]], [6600, [232, 212, 140]]],
+    tone: (c, hs) => { const s = 1 - 0.45 * Math.max(0, 0.62 - hs); return [c[0] * s, c[1] * s, c[2] * s]; },
+    fx: { mottle: [0.45, 0.36, 0.12, 0.3, -0.18], grain: [0.3, 0.25, 0.1, 0.5, -0.14], grainOpacity: 0.3,
+      vignette: ['#6b5a22', 0.2], waterLines: 0.35, grat: 0, period: 'Map of' },
+  },
+  wardmap: {
+    label: 'Ward map', note: 'Black ink on cream with red district lines, after the 1890 Rand McNally city maps',
+    C: { ink: '#1b1815', ink2: '#3a342d', ink3: '#4a4036', ink4: '#6e6458', red: '#b5302a', water: '#44606b',
+      paper: '#f3ecd9', sea: '#dbe3dc', seaLine: '#dbe3dc', key: '#f6f0e0', shore: '#1b1815', park: '#d3dcc0', bound: '#c63a2e' },
+    ramp: [[0, [243, 236, 217]], [6600, [243, 236, 217]]],
+    tone: (c, hs) => { const s = 1 - 0.55 * Math.max(0, 0.62 - hs); return [c[0] * s, c[1] * s, c[2] * s]; },
+    fx: { mottle: [0.4, 0.32, 0.2, 0.22, -0.18], grain: [0.25, 0.2, 0.15, 0.5, -0.14], grainOpacity: 0.28,
+      vignette: ['#5a4a32', 0.18], waterLines: 0, grat: 0, period: 'Map of', wards: true },
+  },
 };
 // The palette the drawing helpers read; buildSheet points it at the chosen style
 const C = { ...STYLES.antique.C };
@@ -167,9 +198,11 @@ const MY1 = mercY(EXTENT.lat1), MY0 = mercY(EXTENT.lat0);
 const MAP_RATIO = (MY1 - MY0) / ((EXTENT.lon1 - EXTENT.lon0) * RAD);
 const latOfMerc = (m) => (2 * Math.atan(Math.exp(m)) - Math.PI / 2) / RAD;
 
-// Map layout: the frame fills the sheet inside the border
+// Map layout: the frame fills the sheet inside the border, or the whole sheet when it's
+// borderless (fmt.border === false: full bleed, no neatline)
 function mapFrame(fmt) {
   const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100), k = W / 1800;
+  if (fmt.border === false) return { x: 0, y: 0, w: W, h: H };
   return { x: 104 * k, y: 104 * k, w: W - 208 * k, h: H - 208 * k };
 }
 
@@ -292,6 +325,25 @@ async function loadElevation(Z, EXTENT, onProgress) {
   return { elev, W, H, n, x0, y0, x1, y1 };
 }
 
+// ---------- Cooperative scheduling ----------
+// The pixel loops (relief, coast, panorama) run on the main thread. They check `due()` as
+// they go and `await pause()` once they've used ~12 ms of a frame. pause() waits for the
+// next frame to paint, then resumes in a fresh task, so the loader keeps animating at the
+// display's rate and clicks are answered while a sheet is drawn, on any speed of machine.
+// (A hidden tab gets no frames, so there it falls back to a timer and keeps drawing.)
+let sliceStart = 0;
+export const due = () => performance.now() - sliceStart > 12;
+export function pause() {
+  return new Promise((resolve) => {
+    let done = false;
+    const go = () => { if (done) return; done = true; sliceStart = performance.now(); resolve(); };
+    const task = () => { const ch = new MessageChannel(); ch.port1.onmessage = go; ch.port2.postMessage(0); };   // after the paint
+    if (document.hidden) return void setTimeout(go);
+    requestAnimationFrame(task);
+    setTimeout(go, 100);
+  });
+}
+
 // Horn hillshade from the north-west over the style's hypsometric ramp
 async function engrave(data, style, onProgress, opts = {}) {
   if (style.paint) return paint(data, style, onProgress, opts);
@@ -332,10 +384,10 @@ async function engrave(data, style, onProgress, opts = {}) {
         o[p] = clamp(rgb[0]); o[p + 1] = clamp(rgb[1]); o[p + 2] = clamp(rgb[2]);
         o[p + 3] = 255;
       }
+      if (due()) { onProgress?.(0.9 * ((sy + jj) / H)); await pause(); }
     }
     ctx.putImageData(img, 0, sy);
     onProgress?.(0.9 * ((sy + hgt) / H));
-    await new Promise((r) => setTimeout(r));           // keep the page responsive
   }
   return finish(canvas, data, onProgress);
 }
@@ -359,10 +411,13 @@ async function paint(data, style, onProgress, opts = {}) {
   const { bands, outline, edge: edgeRGB } = style.paint;
   // Smoothed elevation: block means, sampled bilinearly, so band edges flow like brushwork
   const B = 6, gw = Math.ceil(W / B), gh = Math.ceil(H / B), grid = new Float32Array(gw * gh);
-  for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
-    let sum = 0, cnt = 0;
-    for (let y = gy * B; y < Math.min(H, gy * B + B); y++) for (let x = gx * B; x < Math.min(W, gx * B + B); x++) { sum += Math.max(0, elev[y * W + x]); cnt++; }
-    grid[gy * gw + gx] = sum / cnt;
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      let sum = 0, cnt = 0;
+      for (let y = gy * B; y < Math.min(H, gy * B + B); y++) for (let x = gx * B; x < Math.min(W, gx * B + B); x++) { sum += Math.max(0, elev[y * W + x]); cnt++; }
+      grid[gy * gw + gx] = sum / cnt;
+    }
+    if (due()) await pause();
   }
   const smooth = (i, j) => {
     const fx = Math.max(0, Math.min(gw - 1.001, i / B - 0.5)), fy = Math.max(0, Math.min(gh - 1.001, j / B - 0.5));
@@ -401,10 +456,10 @@ async function paint(data, style, onProgress, opts = {}) {
         o[p] = clamp(col[0] * s); o[p + 1] = clamp(col[1] * s); o[p + 2] = clamp(col[2] * s);
         o[p + 3] = 255;
       }
+      if (due()) { onProgress?.(0.9 * ((sy + jj) / H)); await pause(); }
     }
     ctx.putImageData(img, 0, sy);
     onProgress?.(0.9 * ((sy + hgt) / H));
-    await new Promise((r) => setTimeout(r));
   }
   return finish(canvas, data, onProgress, { motifs: motifs(data, smooth, opts) });
 }
@@ -879,7 +934,7 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
     ${scale}
     ${MAPL ? '' : key}
   </g>
-  ${FX.frame === 'miniature' ? miniatureNeatline(F, k) : FX.frame === 'pichwai' ? pichwaiNeatline(F, k) : FX.frame === 'kalamkari' ? kalamkariNeatline(F, k) : neatline(F, px, py, k, fs, EXT)}
+  ${MAPL && fmt.border === false ? '' : FX.frame === 'miniature' ? miniatureNeatline(F, k) : FX.frame === 'pichwai' ? pichwaiNeatline(F, k) : FX.frame === 'kalamkari' ? kalamkariNeatline(F, k) : neatline(F, px, py, k, fs, EXT)}
 
   ${MAPL ? '' : `<g transform="translate(${f1(F.x)}, ${f1(yLegend)})">
     <line x1="0" y1="0" x2="${fs(56)}" y2="0" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}"/>
@@ -902,11 +957,8 @@ const tint = ([r, g, b, a, o]) => `0 0 0 0 ${r}  0 0 0 0 ${g}  0 0 0 0 ${b}  0 0
 
 
 // ---------- Sheet shell shared by every layout and view ----------
-// The page's Border choice. Off makes every sheet borderless, whichever layout draws it.
-let borderOn = true;
-export function setBorder(on) { borderOn = on; }
-
-// Opens the SVG: shared filters + type styles, paper, mottle and the border (unless the page is borderless or opts.border is false)
+// Opens the SVG: shared filters + type styles, paper, mottle and the border
+// (unless the sheet is borderless, fmt.border === false, or the view asks for none with opts.border)
 export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts = {}) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${fmt.w}in" height="${fmt.h}in" id="chart">
   <defs>
@@ -964,7 +1016,7 @@ export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts =
 
   <rect width="${W}" height="${H}" fill="${C.paper}"/>
   ${FX.mottle ? `<rect width="${W}" height="${H}" filter="url(#mottle)"/>` : ''}
-  ${!borderOn || opts.border === false ? '' : FX.frame === 'miniature' ? miniatureBorder(W, H, k) : FX.frame === 'pichwai' ? pichwaiBorder(W, H, k) : FX.frame === 'kalamkari' ? kalamkariBorder(W, H, k) : border(W, H, k)}
+  ${fmt.border === false || opts.border === false ? '' : FX.frame === 'miniature' ? miniatureBorder(W, H, k) : FX.frame === 'pichwai' ? pichwaiBorder(W, H, k) : FX.frame === 'kalamkari' ? kalamkariBorder(W, H, k) : border(W, H, k)}
 `;
 }
 export function sheetClose(W, H, FX) {
