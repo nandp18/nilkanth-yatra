@@ -87,7 +87,7 @@ const legend = (x, y, fs, ts, items) => {
   for (const [kind, label] of items) {
     if (kind === 'route') { g += `<line x1="${cx}" y1="0" x2="${f1(cx + fs(56))}" y2="0" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}"/>`; cx += fs(68); }
     else { const R = 11.5 * ts; g += `<circle cx="${f1(cx + R)}" cy="0" r="${f1(R)}" fill="${kind === 'end' ? C.red : C.key}" stroke="${C.ink}" stroke-width="${f1(1.4 * ts)}"/>`; cx += R * 2 + fs(10); }
-    g += `<text class="legend" x="${f1(cx)}" y="${fs(6)}" style="font-size:${fs(19)}px">${label}</text>`;
+    g += `<text class="legend" x="${f1(cx)}" y="${fs(6)}" style="font-size:${fs(19)}px">${esc(label)}</text>`;
     cx += textWidth(label, FELL_I, fs(19)) + fs(46);
   }
   return { svg: g + '</g>', width: cx - fs(46) };
