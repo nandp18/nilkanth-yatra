@@ -1,9 +1,10 @@
 // Print edition page: the design chooser (style and layout cards with live thumbnails, region,
 // size and title chips), the preview at relative physical size, and export.
-import { FORMATS, TITLE_FACES, LAYOUTS, LAYOUT_NOTES, STYLES, DETAILS, REFERENCE, kit, extentFor, tileCount, relief, blankRelief, buildSheet, embedFonts, elevationData, elevationSampler } from './print.js';
+import { FORMATS, TITLE_FACES, LAYOUTS, LAYOUT_NOTES, STYLES, DETAILS, REFERENCE, kit, extentFor, tileCount, relief, blankRelief, buildSheet, embedFonts, elevationData, elevationSampler, setBorder } from './print.js';
 import { buildLine, buildProfile, buildStrip, buildPanorama, buildRidges, buildScroll, buildMandala } from './print-views.js';
 import * as printMod from './print.js';
 import { SPANS, drawPlace, placeInfo } from './print-place.js';
+import { exportDpi, sheetCanvas, jpegBlob, tiffBlob } from './print-export.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -17,6 +18,7 @@ const state = {
   mode: params.get('mode') === 'place' ? 'place' : 'journey',
   span: SPANS[params.get('span')] ? params.get('span') : '300',
   towns: params.get('towns') === 'off' ? 'off' : 'on',
+  border: params.get('border') === 'off' ? 'off' : 'on',   // off: borderless sheet, for those who don't want the frame
   place: placeFromParams() || { lat: 28.817, lon: 83.872, title: 'Muktinath', sub: 'Mustang, Nepal' },
 };
 function placeFromParams() {
@@ -113,11 +115,14 @@ function showLoader(title, step, p) {
   $('busy-pill').textContent = known ? `${title}… ${Math.round(p * 100)}%` : `${title}…`;
 }
 
+const setExports = (on) => { for (const id of ['btn-print', 'btn-svg', 'btn-jpg', 'btn-tiff']) $(id).disabled = !on; };
+
 async function render() {
   const my = ++seq, f = FORMATS[state.fmt];
   sizePreview();
   syncChooser();
-  $('btn-print').disabled = $('btn-svg').disabled = true;
+  setExports(false);
+  setBorder(state.border === 'on');
   document.body.classList.remove('ready');
   $('sheet').style.background = STYLES[state.style].C.paper;
   showLoader('Drawing your map', 'Preparing the sheet', null);
@@ -141,7 +146,7 @@ async function render() {
   $('sheet').innerHTML = current;
   $('status').textContent = 'Ready to print';
   document.body.classList.remove('busy');
-  $('btn-print').disabled = $('btn-svg').disabled = false;
+  setExports(true);
   document.body.classList.add('ready');
   thumbs.request();
 }
@@ -159,7 +164,8 @@ $('faces').innerHTML = Object.entries(TITLE_FACES).map(([k, f]) => chip('face', 
 $('modes').innerHTML = chip('mode', 'journey', 'The journey') + chip('mode', 'place', 'Any place');
 $('spans').innerHTML = Object.entries(SPANS).map(([k, s]) => chip('span', k, s.label)).join('');
 $('towns').innerHTML = chip('towns', 'on', 'Named') + chip('towns', 'off', 'Hidden');
-const GROUP_KEY = { style: 'style', layout: 'layout', region: 'region', fmt: 'fmt', face: 'face', mode: 'mode', span: 'span', towns: 'towns' };
+$('borders').innerHTML = chip('border', 'on', 'Framed') + chip('border', 'off', 'Borderless');
+const GROUP_KEY = { style: 'style', layout: 'layout', region: 'region', fmt: 'fmt', face: 'face', mode: 'mode', span: 'span', towns: 'towns', border: 'border' };
 
 document.querySelector('.panel').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-group]');
@@ -167,6 +173,7 @@ document.querySelector('.panel').addEventListener('click', (e) => {
   const key = GROUP_KEY[b.dataset.group];
   if (state[key] === b.dataset.v) return;
   state[key] = b.dataset.v;
+  if (key === 'border') thumbs.done.clear();      // the card thumbnails are drawn with or without the frame
   render();
 });
 // arrow keys move within a group, like a radio group
@@ -198,6 +205,7 @@ function syncChooser() {
     ? { mode: 'place', at: `${P.lat},${P.lon}`, name: P.title, ...(P.sub ? { sub: P.sub } : {}), span: state.span, ...(state.towns === 'off' ? { towns: 'off' } : {}), style: state.style, size: state.fmt }
     : { style: state.style, layout: state.layout, size: state.fmt });
   if (!PLACE && state.layout === 'detail') q.set('region', state.region);
+  if (state.border === 'off') q.set('border', 'off');
   if (state.face !== 'didone') q.set('title', state.face);
   history.replaceState(null, '', `?${q}`);
 }
@@ -325,16 +333,44 @@ for (const [id, key] of [['place-title', 'title'], ['place-sub', 'sub']]) {
 
 window.addEventListener('resize', sizePreview);
 $('btn-print').onclick = () => window.print();
+
+// File name without extension, e.g. van-vicharan-antique-classic-11x14
+function fileBase() {
+  const slug = state.place.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'map';
+  const border = state.border === 'off' ? '-borderless' : '';
+  return state.mode === 'place' ? `${slug}-${state.style}-${state.fmt}${border}`
+    : `van-vicharan-${state.style}-${state.layout}${state.layout === 'detail' ? `-${state.region}` : ''}-${state.fmt}${border}`;
+}
+function saveBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 $('btn-svg').onclick = async () => {
   $('status').textContent = 'Embedding fonts…';
   const svg = await embedFonts(current);
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
-  const slug = state.place.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'map';
-  a.download = state.mode === 'place' ? `${slug}-${state.style}-${state.fmt}.svg`
-    : `van-vicharan-${state.style}-${state.layout}${state.layout === 'detail' ? `-${state.region}` : ''}-${state.fmt}.svg`;
-  a.click();
+  saveBlob(new Blob([svg], { type: 'image/svg+xml' }), `${fileBase()}.svg`);
   $('status').textContent = 'Ready to print';
 };
+
+// JPG or TIFF of the sheet at print resolution, fonts embedded so it matches the preview
+async function exportImage(kind) {
+  const f = FORMATS[state.fmt], dpi = exportDpi(f), paper = STYLES[state.style].C.paper;
+  $('status').textContent = `Rendering ${kind.toUpperCase()} at ${dpi} dpi…`;
+  try {
+    const canvas = await sheetCanvas(await embedFonts(current), f, dpi, paper);
+    const blob = kind === 'tiff' ? tiffBlob(canvas, dpi) : await jpegBlob(canvas, dpi);
+    saveBlob(blob, `${fileBase()}.${kind === 'tiff' ? 'tif' : 'jpg'}`);
+    $('status').textContent = `Ready to print · ${kind.toUpperCase()} at ${dpi} dpi, ${(blob.size / 1048576).toFixed(1)} MB`;
+  } catch (err) {
+    console.error(err);
+    $('status').textContent = `Could not export ${kind.toUpperCase()}: ${err.message}`;
+  }
+}
+$('btn-jpg').onclick = () => exportImage('jpg');
+$('btn-tiff').onclick = () => exportImage('tiff');
 
 render();
