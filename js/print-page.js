@@ -1,6 +1,6 @@
 // Print edition page: the design chooser (style and layout cards with live thumbnails, region,
 // size and title chips), the preview at relative physical size, and export.
-import { FORMATS, TITLE_FACES, LAYOUTS, LAYOUT_NOTES, STYLES, DETAILS, REFERENCE, kit, extentFor, tileCount, relief, blankRelief, buildSheet, embedFonts, elevationData, elevationSampler } from './print.js';
+import { FORMATS, TITLE_FACES, LAYOUTS, LAYOUT_NOTES, STYLES, DETAILS, REFERENCE, kit, extentFor, tileCount, relief, blankRelief, buildSheet, embedFonts, elevationData, elevationSampler, pause } from './print.js';
 import { buildLine, buildProfile, buildStrip, buildPanorama, buildRidges, buildScroll, buildMandala } from './print-views.js';
 import * as printMod from './print.js';
 import { SPANS, drawPlace, placeInfo } from './print-place.js';
@@ -144,6 +144,8 @@ async function render() {
     return;
   }
   if (my !== seq || !svg) return;
+  await pause();                                           // let the loader's last frame paint before the sheet goes in
+  if (my !== seq) return;
   current = svg;
   $('sheet').innerHTML = current;
   $('status').textContent = 'Ready to print';

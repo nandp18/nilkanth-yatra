@@ -7,7 +7,7 @@
 //   Strip     road-book strips (after Ogilby): the route cut into twelve panels, each turned to run up the page
 //   Panorama  a bird's-eye view from over the Indian Ocean, looking north to the Himalaya
 // Units match print.js: hundredths of an inch, with type scaled to the sheet (ts = W / 1800).
-import { kit } from './print.js';
+import { kit, due, pause } from './print.js';
 import { REGIONS, REGION_SHORT } from './data/stops.js';
 
 const {
@@ -545,7 +545,7 @@ async function renderPanorama(data, texHref, SW, SH, pal, onProgress) {
       ybuf[sx] = sy;
     }
     z += dz; dz *= 1.0028;
-    if (++step % 60 === 0) { onProgress?.(clamp((z - zNear * 0.86) / (zFar * 1.06 - zNear * 0.86), 0, 1)); await new Promise((r) => setTimeout(r)); }
+    if (++step % 8 === 0 && due()) { onProgress?.(clamp((z - zNear * 0.86) / (zFar * 1.06 - zNear * 0.86), 0, 1)); await pause(); }
   }
   const cv = new OffscreenCanvas(SW, SH);
   cv.getContext('2d').putImageData(img, 0, 0);

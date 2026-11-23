@@ -294,6 +294,25 @@ async function loadElevation(Z, EXTENT, onProgress) {
   return { elev, W, H, n, x0, y0, x1, y1 };
 }
 
+// ---------- Cooperative scheduling ----------
+// The pixel loops (relief, coast, panorama) run on the main thread. They check `due()` as
+// they go and `await pause()` once they've used ~12 ms of a frame. pause() waits for the
+// next frame to paint, then resumes in a fresh task, so the loader keeps animating at the
+// display's rate and clicks are answered while a sheet is drawn, on any speed of machine.
+// (A hidden tab gets no frames, so there it falls back to a timer and keeps drawing.)
+let sliceStart = 0;
+export const due = () => performance.now() - sliceStart > 12;
+export function pause() {
+  return new Promise((resolve) => {
+    let done = false;
+    const go = () => { if (done) return; done = true; sliceStart = performance.now(); resolve(); };
+    const task = () => { const ch = new MessageChannel(); ch.port1.onmessage = go; ch.port2.postMessage(0); };   // after the paint
+    if (document.hidden) return void setTimeout(go);
+    requestAnimationFrame(task);
+    setTimeout(go, 100);
+  });
+}
+
 // Horn hillshade from the north-west over the style's hypsometric ramp
 async function engrave(data, style, onProgress, opts = {}) {
   if (style.paint) return paint(data, style, onProgress, opts);
@@ -334,10 +353,10 @@ async function engrave(data, style, onProgress, opts = {}) {
         o[p] = clamp(rgb[0]); o[p + 1] = clamp(rgb[1]); o[p + 2] = clamp(rgb[2]);
         o[p + 3] = 255;
       }
+      if (due()) { onProgress?.(0.9 * ((sy + jj) / H)); await pause(); }
     }
     ctx.putImageData(img, 0, sy);
     onProgress?.(0.9 * ((sy + hgt) / H));
-    await new Promise((r) => setTimeout(r));           // keep the page responsive
   }
   return finish(canvas, data, onProgress);
 }
@@ -361,10 +380,13 @@ async function paint(data, style, onProgress, opts = {}) {
   const { bands, outline, edge: edgeRGB } = style.paint;
   // Smoothed elevation: block means, sampled bilinearly, so band edges flow like brushwork
   const B = 6, gw = Math.ceil(W / B), gh = Math.ceil(H / B), grid = new Float32Array(gw * gh);
-  for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
-    let sum = 0, cnt = 0;
-    for (let y = gy * B; y < Math.min(H, gy * B + B); y++) for (let x = gx * B; x < Math.min(W, gx * B + B); x++) { sum += Math.max(0, elev[y * W + x]); cnt++; }
-    grid[gy * gw + gx] = sum / cnt;
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      let sum = 0, cnt = 0;
+      for (let y = gy * B; y < Math.min(H, gy * B + B); y++) for (let x = gx * B; x < Math.min(W, gx * B + B); x++) { sum += Math.max(0, elev[y * W + x]); cnt++; }
+      grid[gy * gw + gx] = sum / cnt;
+    }
+    if (due()) await pause();
   }
   const smooth = (i, j) => {
     const fx = Math.max(0, Math.min(gw - 1.001, i / B - 0.5)), fy = Math.max(0, Math.min(gh - 1.001, j / B - 0.5));
@@ -403,10 +425,10 @@ async function paint(data, style, onProgress, opts = {}) {
         o[p] = clamp(col[0] * s); o[p + 1] = clamp(col[1] * s); o[p + 2] = clamp(col[2] * s);
         o[p + 3] = 255;
       }
+      if (due()) { onProgress?.(0.9 * ((sy + jj) / H)); await pause(); }
     }
     ctx.putImageData(img, 0, sy);
     onProgress?.(0.9 * ((sy + hgt) / H));
-    await new Promise((r) => setTimeout(r));
   }
   return finish(canvas, data, onProgress, { motifs: motifs(data, smooth, opts) });
 }

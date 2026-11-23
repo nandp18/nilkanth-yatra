@@ -4,7 +4,7 @@
 // railways, rivers, lakes and towns from OpenStreetMap (js/print-osm.js); wider views, or
 // any view when those tiles can't be reached, take rivers, lakes and towns from Natural
 // Earth. Everything is fetched on demand. Units match print.js: hundredths of an inch.
-import { kit, relief, elevationData, elevationSampler, tileCount } from './print.js';
+import { kit, relief, elevationData, elevationSampler, tileCount, due, pause } from './print.js';
 import { osmPlan, osmDetail } from './print-osm.js';
 
 const {
@@ -56,22 +56,30 @@ export function placeInfo(fmt, place, spanKey) {
 // enclosed water wind opposite ways. Returns flat [lon, lat, …] rings like printdata's LAND.
 const coastCache = new WeakMap();
 function coastline(data) {
-  if (coastCache.has(data)) return coastCache.get(data);
+  if (!coastCache.has(data)) coastCache.set(data, trace(data));
+  return coastCache.get(data);
+}
+async function trace(data) {
   const { elev, W, H, n, x0, y0 } = data;
   const s = Math.max(1, Math.ceil(Math.max(W, H) / 1600));
   const cw = Math.ceil(W / s), ch = Math.ceil(H / s), gw = cw + 2, gh = ch + 2;
   const v = new Float32Array(gw * gh).fill(-1);
-  for (let gy = 0; gy < ch; gy++) for (let gx = 0; gx < cw; gx++) {
-    let sum = 0, cnt = 0;
-    for (let y = gy * s, y1 = Math.min(H, y + s); y < y1; y++) {
-      const o = y * W;
-      for (let x = gx * s, x1 = Math.min(W, x + s); x < x1; x++) { const e = elev[o + x]; sum += e > 6 ? 6 : e < -6 ? -6 : e; cnt++; }
+  for (let gy = 0; gy < ch; gy++) {
+    for (let gx = 0; gx < cw; gx++) {
+      let sum = 0, cnt = 0;
+      for (let y = gy * s, y1 = Math.min(H, y + s); y < y1; y++) {
+        const o = y * W;
+        for (let x = gx * s, x1 = Math.min(W, x + s); x < x1; x++) { const e = elev[o + x]; sum += e > 6 ? 6 : e < -6 ? -6 : e; cnt++; }
+      }
+      v[(gy + 1) * gw + gx + 1] = sum / cnt - 0.5;          // land is a metre or more above the sea
     }
-    v[(gy + 1) * gw + gx + 1] = sum / cnt - 0.5;          // land is a metre or more above the sea
+    if (due()) await pause();
   }
   // each crossing: the edge it enters a cell by → the edge it leaves by
   const next = new Map();
-  for (let cy = 0; cy < gh - 1; cy++) for (let cx = 0; cx < gw - 1; cx++) {
+  for (let cy = 0; cy < gh - 1; cy++) {
+   if (due()) await pause();
+   for (let cx = 0; cx < gw - 1; cx++) {
     const o = cy * gw + cx;
     const idx = (v[o] > 0 ? 8 : 0) | (v[o + 1] > 0 ? 4 : 0) | (v[o + gw + 1] > 0 ? 2 : 0) | (v[o + gw] > 0 ? 1 : 0);
     if (!idx || idx === 15) continue;
@@ -83,6 +91,7 @@ function coastline(data) {
       case 10: next.set(t, l); next.set(b, r); break; case 11: next.set(t, r); break; case 12: next.set(r, l); break;
       case 13: next.set(r, b); break; default: next.set(b, l);
     }
+   }
   }
   const point = (id) => {
     const o = id >> 1, cx = o % gw, cy = (o / gw) | 0, a = v[o];
@@ -95,6 +104,7 @@ function coastline(data) {
   // not a lake: dropping it leaves the land whole. Real lakes come from the map data.
   const minHole = Math.max(6, gw * gh * 2e-5);
   while (next.size) {
+    if (due()) await pause();
     const start = next.keys().next().value, pts = [];
     let e = start;
     do { pts.push(point(e)); const to = next.get(e); next.delete(e); e = to; } while (e !== undefined && e !== start);
@@ -113,7 +123,6 @@ function coastline(data) {
     for (const [x, y] of simple) flat.push(lonOf(x), latOf(y));
     rings.push(flat);
   }
-  coastCache.set(data, rings);
   return rings;
 }
 function simplify(pts, tol) {          // Douglas–Peucker
@@ -202,7 +211,7 @@ export async function drawPlace(fmt, faceKey, styleKey, place, { span = 300, tow
   progress?.('Tracing the coast')(0.5);
   await new Promise((r) => setTimeout(r));
   const sample = elevationSampler(data);
-  const land = coastline(data);
+  const land = await coastline(data);
   progress?.('Gathering map detail')(0.9);
   const geo = { land, landAt: (lon, lat) => sample(lon, lat) > 0.5, ...(await vec) };
   await document.fonts.ready;
