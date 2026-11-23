@@ -37,6 +37,7 @@ export const DETAILS = {
 export const FORMATS = {
   // Home printers can't print to the edge, so the test sheet sits inside ¼ in margins on Letter
   letter: { w: 8, h: 10.5, label: '8.5 × 11 in (test)', short: '8.5 × 11', page: [8.5, 11], margin: 0.25 },
+  '11x14': { w: 11, h: 14, label: '11 × 14 in', short: '11 × 14' },
   '11x17': { w: 11, h: 17, label: '11 × 17 in (tabloid)', short: '11 × 17' },
   '12x16': { w: 12, h: 16, label: '12 × 16 in', short: '12 × 16' },
   '18x24': { w: 18, h: 24, label: '18 × 24 in', short: '18 × 24' },
@@ -901,7 +902,11 @@ const tint = ([r, g, b, a, o]) => `0 0 0 0 ${r}  0 0 0 0 ${g}  0 0 0 0 ${b}  0 0
 
 
 // ---------- Sheet shell shared by every layout and view ----------
-// Opens the SVG: shared filters + type styles, paper, mottle and the border (unless opts.border is false)
+// The page's Border choice. Off makes every sheet borderless, whichever layout draws it.
+let borderOn = true;
+export function setBorder(on) { borderOn = on; }
+
+// Opens the SVG: shared filters + type styles, paper, mottle and the border (unless the page is borderless or opts.border is false)
 export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts = {}) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${fmt.w}in" height="${fmt.h}in" id="chart">
   <defs>
@@ -959,7 +964,7 @@ export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts =
 
   <rect width="${W}" height="${H}" fill="${C.paper}"/>
   ${FX.mottle ? `<rect width="${W}" height="${H}" filter="url(#mottle)"/>` : ''}
-  ${opts.border === false ? '' : FX.frame === 'miniature' ? miniatureBorder(W, H, k) : FX.frame === 'pichwai' ? pichwaiBorder(W, H, k) : FX.frame === 'kalamkari' ? kalamkariBorder(W, H, k) : border(W, H, k)}
+  ${!borderOn || opts.border === false ? '' : FX.frame === 'miniature' ? miniatureBorder(W, H, k) : FX.frame === 'pichwai' ? pichwaiBorder(W, H, k) : FX.frame === 'kalamkari' ? kalamkariBorder(W, H, k) : border(W, H, k)}
 `;
 }
 export function sheetClose(W, H, FX) {

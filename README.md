@@ -55,7 +55,7 @@ Eleven layouts. Every one works in every style and at every size:
 - **Ridgelines**: the subcontinent drawn as stacked east–west lines of elevation, like the Joy Division cover (`print.html?layout=ridges`).
 - **Line**: a minimal poster. It shows the route as one bold line, the coast as a hairline, the milestones in small capitals and a large quiet title.
 
-Formats are **11 × 17 in** (tabloid, `?size=11x17`), **12 × 16 in**, **18 × 24 in**, **24 × 36 in** and **A2**, plus an **8.5 × 11 in test** sheet that prints inside ¼ in margins on a home printer (`print.html?size=letter`). Every format carries the same content: the stops named on the 18 × 24 in reference sheet are named on all of them. Each one lays out separately:
+Formats are **11 × 14 in** (`?size=11x14`), **11 × 17 in** (tabloid, `?size=11x17`), **12 × 16 in**, **18 × 24 in**, **24 × 36 in** and **A2**, plus an **8.5 × 11 in test** sheet that prints inside ¼ in margins on a home printer (`print.html?size=letter`). Every format carries the same content: the stops named on the 18 × 24 in reference sheet are named on all of them. Each one lays out separately:
 - Type is sized for viewing distance.
 - As many stop names are placed as fit without colliding.
 - The map narrows if the sheet is short.
@@ -65,7 +65,7 @@ The 24 × 36 in poster engraves its relief from twice-as-detailed tiles (about 2
 
 **Choosing a design.** The side panel shows every style and layout as a live thumbnail of the real map. Click one, or use the arrow keys. The address bar updates as you choose, so a design can be shared as a link.
 
-To get a file: **Print / Save PDF** (set margins to *None* and turn on *Background graphics*), or **Download SVG**. The SVG has its fonts embedded, so a print shop sees exactly what you see.
+To get a file: **Print / Save PDF** (set margins to *None* and turn on *Background graphics*), or **Download SVG**. The SVG has its fonts embedded, so a print shop sees exactly what you see. The sheet is framed by default. The **Border** choice makes it borderless (`?border=off`), for a print with no frame. **Download JPG** and **Download TIFF** render the sheet at 300 dpi (uncompressed 8-bit RGB TIFF, JPEG with its dpi set). Very large sheets drop to the highest dpi that stays under about 60 megapixels, so 24 × 36 in renders at about 263 dpi.
 
 ## Run
 
