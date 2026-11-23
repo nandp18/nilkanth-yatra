@@ -157,6 +157,37 @@ export const STYLES = {
     fx: { mottle: [0.5, 0.38, 0.2, 0.5, -0.16], grain: [0.35, 0.25, 0.15, 0.6, -0.14], grainOpacity: 0.4,
       vignette: ['#6b3a1a', 0.3], waterLines: 0.4, grat: 0, motifs: 'kalamkari', waves: 'kalamkari', frame: 'kalamkari' },
   },
+  // The 1890s city plans of the American atlas houses. Land is a flat tint, with no hill
+  // shading, only a touch of shadow on steep ground. On an Any place sheet they add parks and
+  // cemeteries, district lines, river names spaced out along the stream, an Explanation and an
+  // A–Z / 1–n index round the border. `period` turns those on (js/print-place.js).
+  gazetteer: {
+    label: 'Gazetteer', note: 'Fine brown ink on cream, pale blue water, after the 1890s pocket-atlas city maps',
+    C: { ink: '#3b2c20', ink2: '#54402f', ink3: '#5e4632', ink4: '#7a6450', red: '#8a2a1a', water: '#46717c',
+      paper: '#f0e4c6', sea: '#bed6d3', seaLine: '#bed6d3', key: '#f3e9cf', shore: '#46717c', park: '#cfd3a8' },
+    ramp: [[0, [239, 226, 194]], [6600, [239, 226, 194]]],
+    tone: (c, hs) => { const s = 1 - 0.5 * Math.max(0, 0.62 - hs); return [c[0] * s, c[1] * s, c[2] * s]; },
+    fx: { mottle: [0.42, 0.3, 0.16, 0.28, -0.18], grain: [0.3, 0.22, 0.12, 0.5, -0.14], grainOpacity: 0.3,
+      vignette: ['#6b4a22', 0.22], waterLines: 0.25, grat: 0, period: 'New map of' },
+  },
+  cityplan: {
+    label: 'City plan', note: 'Mustard wash, green parks and blue water, after the 1890s Matthews-Northrup city plans',
+    C: { ink: '#1d1a16', ink2: '#3a332a', ink3: '#4a3e2e', ink4: '#6a5d4a', red: '#a02a1c', water: '#2c5c78',
+      paper: '#f1e7c9', sea: '#9cc0cd', seaLine: '#9cc0cd', key: '#f4ead0', shore: '#2c5c78', park: '#8fa968', bound: '#b4553f' },
+    ramp: [[0, [232, 212, 140]], [6600, [232, 212, 140]]],
+    tone: (c, hs) => { const s = 1 - 0.45 * Math.max(0, 0.62 - hs); return [c[0] * s, c[1] * s, c[2] * s]; },
+    fx: { mottle: [0.45, 0.36, 0.12, 0.3, -0.18], grain: [0.3, 0.25, 0.1, 0.5, -0.14], grainOpacity: 0.3,
+      vignette: ['#6b5a22', 0.2], waterLines: 0.35, grat: 0, period: 'Map of' },
+  },
+  wardmap: {
+    label: 'Ward map', note: 'Black ink on cream with red district lines, after the 1890 Rand McNally city maps',
+    C: { ink: '#1b1815', ink2: '#3a342d', ink3: '#4a4036', ink4: '#6e6458', red: '#b5302a', water: '#44606b',
+      paper: '#f3ecd9', sea: '#dbe3dc', seaLine: '#dbe3dc', key: '#f6f0e0', shore: '#1b1815', park: '#d3dcc0', bound: '#c63a2e' },
+    ramp: [[0, [243, 236, 217]], [6600, [243, 236, 217]]],
+    tone: (c, hs) => { const s = 1 - 0.55 * Math.max(0, 0.62 - hs); return [c[0] * s, c[1] * s, c[2] * s]; },
+    fx: { mottle: [0.4, 0.32, 0.2, 0.22, -0.18], grain: [0.25, 0.2, 0.15, 0.5, -0.14], grainOpacity: 0.28,
+      vignette: ['#5a4a32', 0.18], waterLines: 0, grat: 0, period: 'Map of', wards: true },
+  },
 };
 // The palette the drawing helpers read; buildSheet points it at the chosen style
 const C = { ...STYLES.antique.C };

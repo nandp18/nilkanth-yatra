@@ -32,7 +32,7 @@ The middle dates are **estimates** (shown with ≈). They spread the seven years
 - compass rose and scale bar
 - the 65 tirths keyed in the Indian Ocean, as on the original map
 
-Eight map styles, each with its own relief, palette and paper (`STYLES` in `js/print.js`; open one directly with `print.html?style=night`):
+Eleven map styles, each with its own relief, palette and paper (`STYLES` in `js/print.js`; open one directly with `print.html?style=night`):
 - **Antique** (default): the engraved sepia chart.
 - **Natural**: natural-colour shaded relief, after Tom Patterson's National Park Service maps.
 - **Watercolor**: soft pigment washes with pooled edges on cold-press paper, after Molly O'Halloran.
@@ -41,6 +41,7 @@ Eight map styles, each with its own relief, palette and paper (`STYLES` in `js/p
 - **Pahari**: painted like a Kangra/Pahari miniature. It has flat, outlined grounds, little snow-capped peaks, hillocks and trees placed from the real terrain, rippled water, and a lapis band on a gold-flecked pink margin.
 - **Pichwai**: gold on indigo, after the Nathdwara temple hangings. Lotus ponds fill the sea, kadamba trees and cows sit on the land, and a red border carries a gold vine.
 - **Kalamkari**: the pen-drawn temple cloths of Srikalahasti. Madder, indigo and mustard on unbleached cotton, with rock pinnacles, trees of life and peacocks on the land, curling waves and fish in the sea, and a paisley border.
+- **Gazetteer**, **City plan** and **Ward map**: the 1890s American city plans. Gazetteer is fine brown ink on cream with pale blue water, after the pocket-atlas maps. City plan has a mustard land wash, green parks and blue water, after Matthews-Northrup. Ward map is black ink on cream with bold red district lines, after Rand McNally. Land is a flat tint with only a touch of shadow on steep ground. They come into their own on an **Any place** sheet of a city (10 or 25 km across), which adds parks and cemeteries, county and township lines, river names spaced out along the stream, an *Explanation* of the symbols, and an A–Z / 1–n index round the border. The Ward map also draws ward and neighbourhood lines where OpenStreetMap has them.
 
 Eleven layouts. Every one works in every style and at every size:
 - **Classic**: title block, map, numbered key, legend and a chronicle timeline.
@@ -63,8 +64,8 @@ Formats are **11 × 14 in** (`?size=11x14`), **11 × 17 in** (tabloid, `?size=11
 
 The 24 × 36 in poster engraves its relief from twice-as-detailed tiles (about 270 dpi). The title face can be Didone (the default), Garamond, Copperplate or Fell.
 
-**Any place.** Switch the panel to *Any place* to chart wherever you like in the same styles: search a place (OpenStreetMap's Nominatim) or type `lat, lon`, then pick the distance across (25 km to 3,000 km). The relief comes from the same elevation tiles, and the coast is traced from them at sea level. Up to 300 km across, the sheet adds detail from OpenStreetMap through OpenFreeMap's vector tiles, more of it the closer you zoom:
-- **25 km**: the street grid, streams, lakes, suburbs and neighbourhoods.
+**Any place.** Switch the panel to *Any place* to chart wherever you like in the same styles: search a place (OpenStreetMap's Nominatim) or type `lat, lon`, then pick the distance across (10 km to 3,000 km). The relief comes from the same elevation tiles, and the coast is traced from them at sea level. Up to 300 km across, the sheet adds detail from OpenStreetMap through OpenFreeMap's vector tiles, more of it the closer you zoom:
+- **10 and 25 km**: the street grid, streams, lakes, parks, suburbs and neighbourhoods.
 - **100 km**: main roads, railways, rivers and towns.
 - **300 km**: motorways, rivers and cities.
 

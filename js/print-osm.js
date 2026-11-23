@@ -1,6 +1,7 @@
 // Print edition: OpenStreetMap detail for the any-place sheets, from OpenFreeMap's vector tiles
 // (the same tiles the interactive map uses). Roads, railways, rivers, lakes and towns, chosen
-// by the sheet's scale. Tiles are Mapbox Vector Tiles (protobuf), decoded here.
+// by the sheet's scale, plus parks, district lines and river names for the period styles.
+// Tiles are Mapbox Vector Tiles (protobuf), decoded here.
 
 const OFM = 'https://tiles.openfreemap.org/planet';
 const RAD = Math.PI / 180;
@@ -15,12 +16,18 @@ export function osmPlan(km) {
     rail: region,
     waterways: city ? ['river', 'canal', 'stream'] : region ? ['river', 'canal'] : ['river'],
     places: city ? ['city', 'town', 'village', 'suburb', 'quarter'] : region ? ['city', 'town', 'village'] : ['city', 'town'],
+    parks: region,
+    // admin levels: 4 state or province, 6 county, 7–8 township or city, 10 ward or neighbourhood
+    bounds: city ? [4, 6, 7, 8, 10] : region ? [4, 6] : [2, 4],
   };
 }
 
 // Importance of each kind of place: the sheet labels the lowest first; 2 and under are set large
 const PLACE_RANK = { city: 2, town: 4, suburb: 5, village: 6, quarter: 7 };
 const WATER = new Set(['lake', 'river', 'dock']);                    // the sea comes from the traced coast
+// Green ground: city parks and playing fields (landcover), cemeteries (landuse), reserves (park)
+const GREEN = { landcover: new Set(['park', 'recreation_ground', 'golf_course', 'garden']), landuse: new Set(['cemetery']),
+  park: new Set(['national_park', 'state_park', 'nature_reserve', 'conservation', 'protected_area', 'park']) };
 const LATIN = /^[\p{Script=Latin}\p{N}\p{P}\p{Zs}\p{M}]+$/u;
 
 // Tile zoom: about three tiles across the sheet, fewer if the sheet would need too many
@@ -45,7 +52,7 @@ function tile(z, x, y) {
       tileUrl ||= fetch(OFM).then((r) => r.json()).then((j) => j.tiles[0]).catch((e) => { tileUrl = null; throw e; });
       const res = await fetch((await tileUrl).replace('{z}', z).replace('{x}', x).replace('{y}', y));
       if (!res.ok) throw new Error(`tile ${key}: ${res.status}`);
-      return decode(new Uint8Array(await res.arrayBuffer()), ['transportation', 'waterway', 'water', 'place']);
+      return decode(new Uint8Array(await res.arrayBuffer()), ['transportation', 'waterway', 'water', 'place', 'landcover', 'landuse', 'park', 'boundary']);
     })().catch((e) => { tileCache.delete(key); throw e; }));         // a failed tile is fetched again next time
     while (tileCache.size > 160) tileCache.delete(tileCache.keys().next().value);
   }
@@ -61,8 +68,8 @@ export async function osmDetail(ext, pad, km, plan) {
   const tiles = await Promise.all(jobs);
 
   const roads = Object.fromEntries(plan.roads.map((c) => [c, []])), rail = [], waterways = Object.fromEntries(plan.waterways.map((c) => [c, []]));
-  const water = [], places = [], seen = new Set();
-  const wantRoad = new Set(plan.roads), wantWay = new Set(plan.waterways), wantPlace = new Set(plan.places);
+  const water = [], places = [], parks = [], bounds = [], named = new Map(), seen = new Set();
+  const wantRoad = new Set(plan.roads), wantWay = new Set(plan.waterways), wantPlace = new Set(plan.places), wantBound = new Set(plan.bounds);
   for (const [tx, ty, layers] of tiles) {
     for (const [name, L] of Object.entries(layers)) {
       const toLon = (gx) => ((tx + gx / L.extent) / n) * 360 - 180;
@@ -80,7 +87,19 @@ export async function osmDetail(ext, pad, km, plan) {
           if (wantRoad.has(p.class)) { for (const g of f.geometry()) if (g.length >= 4) roads[p.class].push(lonLat(g, tol)); }
           else if (plan.rail && p.class === 'rail' && (!p.subclass || p.subclass === 'rail')) for (const g of f.geometry()) if (g.length >= 4) rail.push(lonLat(g, tol));
         } else if (name === 'waterway') {
-          if (wantWay.has(p.class) && p.brunnel !== 'tunnel') for (const g of f.geometry()) if (g.length >= 4) waterways[p.class].push(lonLat(g, tol));
+          if (!wantWay.has(p.class) || p.brunnel === 'tunnel') continue;
+          const label = (p.class === 'river' || p.class === 'canal') && (p['name:en'] || p.name_en || p.name);
+          for (const g of f.geometry()) {
+            if (g.length < 4) continue;
+            const line = lonLat(g, tol);
+            waterways[p.class].push(line);
+            if (label && LATIN.test(label)) (named.get(label) || named.set(label, []).get(label)).push(line);
+          }
+        } else if (GREEN[name]) {
+          const cls = name === 'landcover' ? p.subclass : p.class;
+          if (plan.parks && f.type === 3 && GREEN[name].has(cls)) parks.push(f.geometry().filter((g) => g.length >= 6).map((g) => lonLat(g, tol)));
+        } else if (name === 'boundary') {
+          if (wantBound.has(p.admin_level) && !p.maritime && !p.disputed) for (const g of f.geometry()) if (g.length >= 4) bounds.push({ level: p.admin_level, line: lonLat(g, tol) });
         } else if (name === 'water') {
           if (WATER.has(p.class) && f.type === 3) water.push(f.geometry().filter((g) => g.length >= 6).map((g) => lonLat(g, tol)));
         } else if (name === 'place' && f.type === 1 && wantPlace.has(p.class)) {
@@ -99,7 +118,7 @@ export async function osmDetail(ext, pad, km, plan) {
     }
   }
   places.sort((a, b) => a.rank - b.rank || a.order - b.order);
-  return { roads, rail, waterways, water, places };
+  return { roads, rail, waterways, water, places, parks, bounds, named };
 }
 
 // Douglas–Peucker over a flat [x, y, …] array
