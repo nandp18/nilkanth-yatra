@@ -297,8 +297,8 @@ export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo) 
   let grat = '';
   for (const i of span(EXT.lon0, EXT.lon1, step)) grat += `M${f1(px(i * step))},${f1(F.y)}V${f1(bottom)}`;
   for (const i of span(EXT.lat0, EXT.lat1, step)) grat += `M${f1(F.x)},${f1(py(i * step))}H${f1(F.x + F.w)}`;
-  let neat = styleNeatline(FX, F, k);
-  if (!neat) {
+  let neat = fmt.border === false ? '' : styleNeatline(FX, F, k);     // full bleed: no neatline
+  if (neat === null) {
     const t = 9 * k, { x, y, w, h } = F, s = fs(15);
     neat = `<rect x="${f1(x - t)}" y="${f1(y - t)}" width="${f1(w + 2 * t)}" height="${f1(h + 2 * t)}" fill="none" stroke="${C.ink}" stroke-width="${f1(1.5 * k)}"/>
     <rect x="${f1(x)}" y="${f1(y)}" width="${f1(w)}" height="${f1(h)}" fill="none" stroke="${C.ink}" stroke-width="${f1(1 * k)}"/>`;

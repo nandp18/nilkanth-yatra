@@ -1,6 +1,6 @@
 // Print edition page: the design chooser (style and layout cards with live thumbnails, region,
 // size and title chips), the preview at relative physical size, and export.
-import { FORMATS, TITLE_FACES, LAYOUTS, LAYOUT_NOTES, STYLES, DETAILS, REFERENCE, kit, extentFor, tileCount, relief, blankRelief, buildSheet, embedFonts, elevationData, elevationSampler, setBorder } from './print.js';
+import { FORMATS, TITLE_FACES, LAYOUTS, LAYOUT_NOTES, STYLES, DETAILS, REFERENCE, kit, extentFor, tileCount, relief, blankRelief, buildSheet, embedFonts, elevationData, elevationSampler } from './print.js';
 import { buildLine, buildProfile, buildStrip, buildPanorama, buildRidges, buildScroll, buildMandala } from './print-views.js';
 import * as printMod from './print.js';
 import { SPANS, drawPlace, placeInfo } from './print-place.js';
@@ -21,6 +21,8 @@ const state = {
   border: params.get('border') === 'off' ? 'off' : 'on',   // off: borderless sheet, for those who don't want the frame
   place: placeFromParams() || { lat: 28.817, lon: 83.872, title: 'Muktinath', sub: 'Mustang, Nepal' },
 };
+// The chosen sheet: its format, plus whether it has a border. Borderless map sheets bleed to the edge.
+const sheetFormat = () => ({ ...FORMATS[state.fmt], border: state.border === 'on' });
 function placeFromParams() {
   const [lat, lon] = (params.get('at') || '').split(',').map(Number);
   if (!params.get('at') || !(Math.abs(lat) <= 90) || !(Math.abs(lon) <= 180)) return null;
@@ -76,7 +78,7 @@ async function drawSheet(f, face, style, layout, region, { zoom, progress, alive
 }
 
 function sizePreview() {
-  const f = FORMATS[state.fmt];
+  const f = sheetFormat();
   const PLACE = state.mode === 'place';
   const maxH = Math.max(420, window.innerHeight - 150);
   const h = maxH * Math.sqrt(f.h / 36);            // bigger sheets preview bigger
@@ -118,11 +120,10 @@ function showLoader(title, step, p) {
 const setExports = (on) => { for (const id of ['btn-print', 'btn-svg', 'btn-jpg', 'btn-tiff']) $(id).disabled = !on; };
 
 async function render() {
-  const my = ++seq, f = FORMATS[state.fmt];
+  const my = ++seq, f = sheetFormat();
   sizePreview();
   syncChooser();
   setExports(false);
-  setBorder(state.border === 'on');
   document.body.classList.remove('ready');
   $('sheet').style.background = STYLES[state.style].C.paper;
   showLoader('Drawing your map', 'Preparing the sheet', null);
@@ -173,7 +174,6 @@ document.querySelector('.panel').addEventListener('click', (e) => {
   const key = GROUP_KEY[b.dataset.group];
   if (state[key] === b.dataset.v) return;
   state[key] = b.dataset.v;
-  if (key === 'border') thumbs.done.clear();      // the card thumbnails are drawn with or without the frame
   render();
 });
 // arrow keys move within a group, like a radio group
@@ -212,17 +212,18 @@ function syncChooser() {
 
 // ---------- Live thumbnails ----------
 // Each card shows the real design, drawn small: style cards show the Map layout in that style,
-// layout cards show each layout in the chosen style. Drawn one at a time after the main sheet.
+// layout cards show each layout in the chosen style. Drawn one at a time after the main sheet,
+// framed or borderless as chosen (the border is part of the key, so each kind is drawn once).
 const THUMB = { w: 6, h: 8, label: '', short: '' };     // 3:4, like 18 × 24
 const thumbs = {
   done: new Map(), queue: [], busy: false,
   wanted() {
-    const list = Object.keys(STYLES).map((s) => [s, 'map', 'style']);
-    if (state.mode !== 'place') for (const l of Object.keys(LAYOUTS)) list.push([state.style, l, 'layout']);
+    const list = Object.keys(STYLES).map((s) => [s, 'map', state.border]);
+    if (state.mode !== 'place') for (const l of Object.keys(LAYOUTS)) list.push([state.style, l, state.border]);
     return list;
   },
   request() {
-    this.queue = this.wanted().filter(([s, l]) => !this.done.has(`${s}|${l}`));
+    this.queue = this.wanted().filter((item) => !this.done.has(item.join('|')));
     this.paint();
     if (!this.busy) this.next();
   },
@@ -230,11 +231,11 @@ const thumbs = {
     const item = this.queue.shift();
     if (!item) { this.busy = false; return; }
     this.busy = true;
-    const [s, l] = item, key = `${s}|${l}`;
+    const [s, l, border] = item, key = item.join('|');
     try {
       if (!this.done.has(key)) {
         const zoom = l === 'detail' ? 6 : 5;
-        const svg = await drawSheet(THUMB, 'didone', s, l, 'north', { zoom });
+        const svg = await drawSheet({ ...THUMB, border: border === 'on' }, 'didone', s, l, 'north', { zoom });
         this.done.set(key, await rasterize(svg, 300, 400));
         this.paint();
       }
@@ -244,7 +245,7 @@ const thumbs = {
   },
   paint() {
     for (const b of document.querySelectorAll('.card')) {
-      const key = b.dataset.group === 'style' ? `${b.dataset.v}|map` : `${state.style}|${b.dataset.v}`;
+      const key = b.dataset.group === 'style' ? `${b.dataset.v}|map|${state.border}` : `${state.style}|${b.dataset.v}|${state.border}`;
       const url = this.done.get(key), box = b.querySelector('.thumb'), img = box.querySelector('img');
       if (b.dataset.group === 'layout') box.style.setProperty('--paper', STYLES[state.style].C.paper);
       if (url) { if (img.src !== url) img.src = url; img.hidden = false; box.classList.remove('loading'); }
@@ -346,7 +347,7 @@ function saveBlob(blob, name) {
   a.href = URL.createObjectURL(blob);
   a.download = name;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);     // a large TIFF can take a while to hand over
 }
 
 $('btn-svg').onclick = async () => {
@@ -356,21 +357,35 @@ $('btn-svg').onclick = async () => {
   $('status').textContent = 'Ready to print';
 };
 
-// JPG or TIFF of the sheet at print resolution, fonts embedded so it matches the preview
+// JPG or TIFF of the sheet at print resolution, fonts embedded so it matches the preview.
+// Everything about the sheet is read up front, so changing the design mid-export can't mislabel
+// the file; one export runs at a time.
+let exporting = false;
 async function exportImage(kind) {
-  const f = FORMATS[state.fmt], dpi = exportDpi(f), paper = STYLES[state.style].C.paper;
-  $('status').textContent = `Rendering ${kind.toUpperCase()} at ${dpi} dpi…`;
+  if (exporting || !current) return;
+  exporting = true;
+  const KIND = kind.toUpperCase(), svg = current, name = `${fileBase()}.${kind === 'tiff' ? 'tif' : 'jpg'}`;
+  const f = sheetFormat(), dpi = exportDpi(f), paper = STYLES[state.style].C.paper;
+  $('status').textContent = `Rendering ${KIND} at ${dpi} dpi…`;
   try {
-    const canvas = await sheetCanvas(await embedFonts(current), f, dpi, paper);
+    const canvas = await sheetCanvas(await embedFonts(svg), f, dpi, paper);
     const blob = kind === 'tiff' ? tiffBlob(canvas, dpi) : await jpegBlob(canvas, dpi);
-    saveBlob(blob, `${fileBase()}.${kind === 'tiff' ? 'tif' : 'jpg'}`);
-    $('status').textContent = `Ready to print · ${kind.toUpperCase()} at ${dpi} dpi, ${(blob.size / 1048576).toFixed(1)} MB`;
+    saveBlob(blob, name);
+    $('status').textContent = `Ready to print · ${KIND} at ${dpi} dpi, ${(blob.size / 1048576).toFixed(1)} MB`;
   } catch (err) {
     console.error(err);
-    $('status').textContent = `Could not export ${kind.toUpperCase()}: ${err.message}`;
-  }
+    $('status').textContent = `Could not export ${KIND}: ${err.message}`;
+  } finally { exporting = false; }
 }
 $('btn-jpg').onclick = () => exportImage('jpg');
 $('btn-tiff').onclick = () => exportImage('tiff');
+
+// The Download menu closes on a choice, a click elsewhere, or Escape
+const menu = $('download');
+menu.addEventListener('click', (e) => { if (e.target.closest('button:not(:disabled)')) menu.open = false; });
+document.addEventListener('click', (e) => { if (menu.open && !menu.contains(e.target)) menu.open = false; });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && menu.open) { menu.open = false; menu.querySelector('summary').focus(); }
+});
 
 render();

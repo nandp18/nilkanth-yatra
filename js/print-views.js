@@ -152,7 +152,7 @@ export function buildLine(fmt, faceKey, styleKey) {
 // =====================================================================
 export function buildRidges(fmt, faceKey, styleKey, sample) {
   const E = setup(fmt, faceKey, styleKey), { W, H, k, ts, fs, face, FX } = E;
-  const framed = !!FX.frame;                       // painted styles keep their borders
+  const framed = !!FX.frame && fmt.border !== false;   // painted styles keep their borders, unless borderless
   const M = (framed ? 150 : 130) * k, foot = fs(340);
   const F = { x: M, y: M + fs(70), w: W - 2 * M, h: H - 2 * M - foot - fs(70) };
   const lon0 = 67.4, lon1 = 97.4, m0 = mercY(6.4), m1 = mercY(33.6);
@@ -652,7 +652,7 @@ const isFramed = (FX) => !!FX.frame;
 // =====================================================================
 export function buildScroll(fmt, faceKey, styleKey, sample) {
   const E = setup(fmt, faceKey, styleKey), { W, H, k, ts, fs, face, FX } = E;
-  const framed = isFramed(FX), M = (framed ? 150 : 120) * k;
+  const framed = isFramed(FX) && fmt.border !== false, M = (framed ? 150 : 120) * k;
   const head = header(E, M - fs(20), 'A pilgrim’s scroll of the sixty-five tirths', FACTS, 0.78);
   const tint = regionTints();
   const per = 8, rows = Math.ceil(STOPS.length / per);
@@ -780,7 +780,7 @@ export function buildScroll(fmt, faceKey, styleKey, sample) {
 // =====================================================================
 export function buildMandala(fmt, faceKey, styleKey) {
   const E = setup(fmt, faceKey, styleKey), { W, H, k, ts, fs, face, FX } = E;
-  const framed = isFramed(FX), M = (framed ? 150 : 120) * k, foot = fs(330);
+  const framed = isFramed(FX) && fmt.border !== false, M = (framed ? 150 : 120) * k, foot = fs(330);
   const cx = W / 2, Rmax = Math.min(W / 2 - M, (H - foot - 2 * M) / 2) - fs(10);
   const blockH = 2 * Rmax + fs(70) + fs(130 * face.scale) + fs(70), cy = Math.max(M + fs(10), (H - blockH) / 2) + Rmax;
   const nameBand = fs(150), R5 = Rmax - nameBand;                  // petals reach R5

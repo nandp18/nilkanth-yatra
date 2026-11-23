@@ -167,9 +167,11 @@ const MY1 = mercY(EXTENT.lat1), MY0 = mercY(EXTENT.lat0);
 const MAP_RATIO = (MY1 - MY0) / ((EXTENT.lon1 - EXTENT.lon0) * RAD);
 const latOfMerc = (m) => (2 * Math.atan(Math.exp(m)) - Math.PI / 2) / RAD;
 
-// Map layout: the frame fills the sheet inside the border
+// Map layout: the frame fills the sheet inside the border, or the whole sheet when it's
+// borderless (fmt.border === false: full bleed, no neatline)
 function mapFrame(fmt) {
   const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100), k = W / 1800;
+  if (fmt.border === false) return { x: 0, y: 0, w: W, h: H };
   return { x: 104 * k, y: 104 * k, w: W - 208 * k, h: H - 208 * k };
 }
 
@@ -879,7 +881,7 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
     ${scale}
     ${MAPL ? '' : key}
   </g>
-  ${FX.frame === 'miniature' ? miniatureNeatline(F, k) : FX.frame === 'pichwai' ? pichwaiNeatline(F, k) : FX.frame === 'kalamkari' ? kalamkariNeatline(F, k) : neatline(F, px, py, k, fs, EXT)}
+  ${MAPL && fmt.border === false ? '' : FX.frame === 'miniature' ? miniatureNeatline(F, k) : FX.frame === 'pichwai' ? pichwaiNeatline(F, k) : FX.frame === 'kalamkari' ? kalamkariNeatline(F, k) : neatline(F, px, py, k, fs, EXT)}
 
   ${MAPL ? '' : `<g transform="translate(${f1(F.x)}, ${f1(yLegend)})">
     <line x1="0" y1="0" x2="${fs(56)}" y2="0" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}"/>
@@ -902,11 +904,8 @@ const tint = ([r, g, b, a, o]) => `0 0 0 0 ${r}  0 0 0 0 ${g}  0 0 0 0 ${b}  0 0
 
 
 // ---------- Sheet shell shared by every layout and view ----------
-// The page's Border choice. Off makes every sheet borderless, whichever layout draws it.
-let borderOn = true;
-export function setBorder(on) { borderOn = on; }
-
-// Opens the SVG: shared filters + type styles, paper, mottle and the border (unless the page is borderless or opts.border is false)
+// Opens the SVG: shared filters + type styles, paper, mottle and the border
+// (unless the sheet is borderless, fmt.border === false, or the view asks for none with opts.border)
 export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts = {}) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${fmt.w}in" height="${fmt.h}in" id="chart">
   <defs>
@@ -964,7 +963,7 @@ export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts =
 
   <rect width="${W}" height="${H}" fill="${C.paper}"/>
   ${FX.mottle ? `<rect width="${W}" height="${H}" filter="url(#mottle)"/>` : ''}
-  ${!borderOn || opts.border === false ? '' : FX.frame === 'miniature' ? miniatureBorder(W, H, k) : FX.frame === 'pichwai' ? pichwaiBorder(W, H, k) : FX.frame === 'kalamkari' ? kalamkariBorder(W, H, k) : border(W, H, k)}
+  ${fmt.border === false || opts.border === false ? '' : FX.frame === 'miniature' ? miniatureBorder(W, H, k) : FX.frame === 'pichwai' ? pichwaiBorder(W, H, k) : FX.frame === 'kalamkari' ? kalamkariBorder(W, H, k) : border(W, H, k)}
 `;
 }
 export function sheetClose(W, H, FX) {

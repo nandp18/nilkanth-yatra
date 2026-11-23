@@ -65,7 +65,7 @@ The 24 × 36 in poster engraves its relief from twice-as-detailed tiles (about 2
 
 **Choosing a design.** The side panel shows every style and layout as a live thumbnail of the real map. Click one, or use the arrow keys. The address bar updates as you choose, so a design can be shared as a link.
 
-To get a file: **Print / Save PDF** (set margins to *None* and turn on *Background graphics*), or **Download SVG**. The SVG has its fonts embedded, so a print shop sees exactly what you see. The sheet is framed by default. The **Border** choice makes it borderless (`?border=off`), for a print with no frame. **Download JPG** and **Download TIFF** render the sheet at 300 dpi (uncompressed 8-bit RGB TIFF, JPEG with its dpi set). Very large sheets drop to the highest dpi that stays under about 60 megapixels, so 24 × 36 in renders at about 263 dpi.
+To get a file: **Print / Save PDF** (set margins to *None* and turn on *Background graphics*), or **Download SVG**. The SVG has its fonts embedded, so a print shop sees exactly what you see. The sheet is framed by default. The **Border** choice makes it borderless (`?border=off`): the Map, Footprints, Detail and Any place sheets then run the map to the edge of the sheet with no neatline, and the poster layouts (Classic, Line and the rest) keep their paper margins without the frame. **Download** offers SVG, JPG and TIFF. JPG and TIFF render the sheet at 300 dpi (uncompressed 8-bit RGB TIFF, JPEG with its dpi set). Very large sheets drop to the highest dpi that stays under about 60 megapixels, so 24 × 36 in renders at about 263 dpi.
 
 ## Run
 

@@ -38,6 +38,27 @@ body.busy .toolbar .summary { display: none; }
 .toolbar button.ghost { background: #fff; color: var(--ink); border: 1px solid var(--rule); }
 .toolbar button.ghost:hover:not(:disabled) { border-color: var(--ink); }
 .toolbar button:disabled { opacity: .4; cursor: progress; }
+/* Download menu: SVG, JPG, TIFF under one pill so the toolbar fits narrow screens */
+.toolbar .menu { position: relative; }
+.toolbar .menu > summary {
+  display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px 0 16px; border-radius: 999px; cursor: pointer;
+  list-style: none; background: #fff; color: var(--ink); border: 1px solid var(--rule); font: 500 13px Inter, system-ui, sans-serif;
+}
+.toolbar .menu > summary::-webkit-details-marker { display: none; }
+.toolbar .menu > summary::after { content: ''; width: 6px; height: 6px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: translateY(-2px) rotate(45deg); }
+.toolbar .menu > summary:hover, .toolbar .menu[open] > summary { border-color: var(--ink); }
+.toolbar .menu-list {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 4; display: grid; width: 250px; padding: 6px;
+  background: #fff; border: 1px solid var(--rule); border-radius: 12px; box-shadow: 0 8px 24px rgba(30, 26, 22, .12); white-space: normal;
+}
+.toolbar .menu-list button {
+  display: grid; gap: 1px; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: var(--ink); text-align: left; cursor: pointer;
+  font: 400 12px/1.35 Inter, system-ui, sans-serif;
+}
+.toolbar .menu-list button b { font-weight: 600; font-size: 13px; }
+.toolbar .menu-list button span { color: var(--muted); }
+.toolbar .menu-list button:hover:not(:disabled), .toolbar .menu-list button:focus-visible { background: var(--soft); }
+@media (max-width: 480px) { .toolbar .wide { display: none; } }
 
 /* ---------- studio: chooser + preview ---------- */
 .studio { display: grid; grid-template-columns: minmax(300px, 360px) 1fr; }
