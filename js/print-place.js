@@ -5,7 +5,7 @@
 // any view when those tiles can't be reached, take rivers, lakes and towns from Natural
 // Earth. Everything is fetched on demand. Units match print.js: hundredths of an inch.
 import { kit, STYLES, relief, elevationData, elevationSampler, tileCount, due, pause } from './print.js';
-import { osmPlan, osmDetail } from './print-osm.js';
+import { osmPlan, osmDetail, seaPolygons } from './print-osm.js';
 
 const {
   C, RAD, mercY, latOfMerc, f1, esc, clamp, textWidth, FELL_I, boxHit, ornamentRule, compassRose,
@@ -54,17 +54,34 @@ export function placeInfo(fmt, place, spanKey) {
 // Marching squares at sea level over block means of the grid, with a ring of sea added all
 // round so every outline closes. Rings run with the land on their right, so islands and
 // enclosed water wind opposite ways. Returns flat [lon, lat, …] rings like printdata's LAND.
+// With `sea` (OpenStreetMap's ocean polygons) the sea is wherever they fall, rasterised onto the
+// same grid; without, it is wherever the ground is under a metre.
 const coastCache = new WeakMap();
-function coastline(data) {
+function coastline(data, sea) {
+  if (sea) return trace(data, sea);
   if (!coastCache.has(data)) coastCache.set(data, trace(data));
   return coastCache.get(data);
 }
-async function trace(data) {
+async function trace(data, sea) {
   const { elev, W, H, n, x0, y0 } = data;
   const s = Math.max(1, Math.ceil(Math.max(W, H) / 1600));
   const cw = Math.ceil(W / s), ch = Math.ceil(H / s), gw = cw + 2, gh = ch + 2;
   const v = new Float32Array(gw * gh).fill(-1);
-  for (let gy = 0; gy < ch; gy++) {
+  if (sea) {
+    const cv = new OffscreenCanvas(cw, ch), g = cv.getContext('2d');
+    const X = (lon) => ((((lon + 180) / 360) * n - x0) * 256) / s, Y = (lat) => ((((1 - mercY(lat) / Math.PI) / 2) * n - y0) * 256) / s;
+    for (const poly of sea) {
+      g.beginPath();
+      for (const r of poly) {
+        g.moveTo(X(r[0]), Y(r[1]));
+        for (let i = 2; i < r.length; i += 2) g.lineTo(X(r[i]), Y(r[i + 1]));
+        g.closePath();
+      }
+      g.fill('evenodd');
+    }
+    const a = g.getImageData(0, 0, cw, ch).data;              // coverage, anti-aliased, so the line falls between cells
+    for (let gy = 0; gy < ch; gy++) for (let gx = 0; gx < cw; gx++) v[(gy + 1) * gw + gx + 1] = 0.5 - a[(gy * cw + gx) * 4 + 3] / 255;
+  } else for (let gy = 0; gy < ch; gy++) {
     for (let gx = 0; gx < cw; gx++) {
       let sum = 0, cnt = 0;
       for (let y = gy * s, y1 = Math.min(H, y + s); y < y1; y++) {
@@ -203,6 +220,7 @@ export async function drawPlace(fmt, faceKey, styleKey, place, { span = 300, tow
   const ext = placeExtent(fmt, place.lat, place.lon, SPANS[span].km), pad = padExtent(ext), z = placeZoom(fmt, ext, pad);
   const vec = vectors(ext, pad, towns);                    // alongside the tiles
   vec.catch(() => {});                                     // handled where it's awaited
+  const sea = seaPolygons(pad, SPANS[span].km).catch((err) => { console.warn('OpenStreetMap coastline unavailable; tracing it from elevation', err); return null; });
   const engraving = progress?.('Engraving relief');
   const data = await elevationData(z, pad, (p) => engraving?.(0.85 * p));
   if (!alive()) return null;
@@ -213,7 +231,7 @@ export async function drawPlace(fmt, faceKey, styleKey, place, { span = 300, tow
   progress?.('Tracing the coast')(0.5);
   await new Promise((r) => setTimeout(r));
   const sample = elevationSampler(data);
-  const land = await coastline(data);
+  const land = await coastline(data, await sea);
   progress?.('Gathering map detail')(0.9);
   const geo = { land, landAt: (lon, lat) => sample(lon, lat) > 0.5, ...(await vec) };
   await document.fonts.ready;

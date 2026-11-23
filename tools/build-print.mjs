@@ -33,6 +33,14 @@ function clipRing(ring, [x0, y0, x1, y1]) {
 
 function simplify(pts, tol) {          // Douglas–Peucker
   if (pts.length < 3) return pts;
+  // A closed ring starts and ends on the same point, so every distance from that "chord" is 0 and
+  // the ring would collapse (this dropped every island). Split it at its farthest point instead.
+  const [fx, fy] = pts[0], [lx, ly] = pts[pts.length - 1];
+  if (fx === lx && fy === ly) {
+    let far = 0, dmax = -1;
+    for (let i = 1; i < pts.length - 1; i++) { const d = Math.hypot(pts[i][0] - fx, pts[i][1] - fy); if (d > dmax) { dmax = d; far = i; } }
+    if (far) return [...simplify(pts.slice(0, far + 1), tol), ...simplify(pts.slice(far), tol).slice(1)];
+  }
   const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
   const stack = [[0, pts.length - 1]];
   while (stack.length) {

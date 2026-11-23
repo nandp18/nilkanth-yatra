@@ -28,6 +28,7 @@ const WATER = new Set(['lake', 'river', 'dock']);                    // the sea 
 // Green ground: city parks and playing fields (landcover), cemeteries (landuse), reserves (park)
 const GREEN = { landcover: new Set(['park', 'recreation_ground', 'golf_course', 'garden']), landuse: new Set(['cemetery']),
   park: new Set(['national_park', 'state_park', 'nature_reserve', 'conservation', 'protected_area', 'park']) };
+const OPEN_WATER = new Set(['ocean', 'river', 'lake']);
 const LATIN = /^[\p{Script=Latin}\p{N}\p{P}\p{Zs}\p{M}]+$/u;
 
 // Tile zoom: about three tiles across the sheet, fewer if the sheet would need too many
@@ -119,6 +120,35 @@ export async function osmDetail(ext, pad, km, plan) {
   }
   places.sort((a, b) => a.rank - b.rank || a.order - b.order);
   return { roads, rail, waterways, water, places, parks, bounds, named };
+}
+
+// Open water as OpenStreetMap maps it: sea, rivers and lakes (polygons cut at tile edges) over an
+// extent, at a tile zoom that suits the distance across. Any place sheets trace their coast from
+// these at every scale: elevation alone fills in low deltas and tidal flats (the Sundarbans, the
+// Meghna, whose mouth OpenStreetMap maps as river, not sea) and floods land below sea level.
+// Rivers and lakes only reach the tiles once they're wide enough to see. Throws if the tiles can't
+// be reached.
+export async function seaPolygons(pad, km) {
+  const lat = (pad.lat0 + pad.lat1) / 2, z = tileZoom(pad, lat, km), { x0, x1, y0, y1 } = tileRange(z, pad), n = 2 ** z;
+  const jobs = [];
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) jobs.push(tile(z, x, y).then((t) => [x, y, t]));
+  const out = [];
+  for (const [tx, ty, layers] of await Promise.all(jobs)) {
+    const L = layers.water;
+    if (!L) continue;
+    for (const f of L.features) {
+      if (f.type !== 3 || !OPEN_WATER.has(f.props.class) || f.props.intermittent) continue;
+      out.push(f.geometry().filter((g) => g.length >= 6).map((g) => {
+        const o = new Array(g.length);
+        for (let i = 0; i < g.length; i += 2) {
+          o[i] = ((tx + g[i] / L.extent) / n) * 360 - 180;
+          o[i + 1] = Math.atan(Math.sinh(Math.PI * (1 - (2 * (ty + g[i + 1] / L.extent)) / n))) / RAD;
+        }
+        return o;
+      }));
+    }
+  }
+  return out;
 }
 
 // Douglas–Peucker over a flat [x, y, …] array
