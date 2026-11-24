@@ -3,7 +3,7 @@
 import { FORMATS, TITLE_FACES, LAYOUTS, LAYOUT_NOTES, STYLES, DETAILS, REFERENCE, kit, extentFor, tileCount, relief, blankRelief, buildSheet, embedFonts, elevationData, elevationSampler, pause } from './print.js';
 import { buildLine, buildProfile, buildStrip, buildPanorama, buildRidges, buildScroll, buildMandala } from './print-views.js';
 import * as printMod from './print.js';
-import { SPANS, drawPlace, placeInfo } from './print-place.js';
+import { SPANS, drawPlace, placeInfo, cityExtras, CITY_KM, BOX_CORNERS } from './print-place.js';
 import { exportDpi, sheetCanvas, jpegBlob, tiffBlob } from './print-export.js';
 
 const $ = (id) => document.getElementById(id);
@@ -18,6 +18,9 @@ const state = {
   mode: params.get('mode') === 'place' ? 'place' : 'journey',
   span: SPANS[params.get('span')] ? params.get('span') : '300',
   towns: params.get('towns') === 'off' ? 'off' : 'on',
+  box: BOX_CORNERS.includes(params.get('box')) ? params.get('box') : 'auto',   // where the title box goes
+  // city details switched on or off by hand; the rest follow the style's defaults (cityExtras)
+  extras: Object.fromEntries(['landmarks', 'refs', 'streets', 'wards'].filter((k) => ['on', 'off'].includes(params.get(k))).map((k) => [k, params.get(k) === 'on'])),
   border: params.get('border') === 'off' ? 'off' : 'on',   // off: borderless sheet, for those who don't want the frame
   place: placeFromParams() || { lat: 28.817, lon: 83.872, title: 'Muktinath', sub: 'Mustang, Nepal' },
 };
@@ -136,7 +139,7 @@ async function render() {
   let svg;
   try {
     svg = state.mode === 'place'
-      ? await drawPlace(f, state.face, state.style, state.place, { span: state.span, towns: state.towns === 'on', progress, alive: () => my === seq })
+      ? await drawPlace(f, state.face, state.style, state.place, { span: state.span, towns: state.towns === 'on', extras: state.extras, box: state.box, progress, alive: () => my === seq })
       : await drawSheet(f, state.face, state.style, state.layout, state.region, { progress, alive: () => my === seq });
   } catch (err) {
     console.error(err);
@@ -148,6 +151,7 @@ async function render() {
   if (my !== seq) return;
   current = svg;
   $('sheet').innerHTML = current;
+  zoom.attach();
   $('status').textContent = 'Ready to print';
   document.body.classList.remove('busy');
   setExports(true);
@@ -160,7 +164,21 @@ const card = (group, k, name, note) => `<button class="card" role="radio" data-g
   <span class="thumb loading" style="--paper:${STYLES[group === 'style' ? k : 'antique'].C.paper}"><img alt="" hidden></span>
   <span class="name">${name}</span><span class="note">${note}</span></button>`;
 const chip = (group, k, label, extra = '') => `<button class="chip" role="radio" data-group="${group}" data-v="${k}" aria-checked="false"${extra}>${label}</button>`;
-$('styles').innerHTML = Object.entries(STYLES).map(([k, s]) => card('style', k, s.label, s.note.replace(/, after .*/, ''))).join('');
+// Styles in families, so the list stays easy to scan as it grows. A style not listed here
+// lands in a last group of its own, so a new one is never lost from the chooser.
+const STYLE_GROUPS = [
+  ['Shaded relief', 'Hills drawn from the elevation data', ['antique', 'natural', 'watercolor', 'cyanotype', 'night']],
+  ['Painted', 'Flat painted grounds with drawn peaks and trees', ['pahari', 'pichwai', 'kalamkari', 'poster']],
+  ['City plans', 'Best on an Any place sheet of a city, 10 or 25 km across', ['gazetteer', 'cityplan', 'wardmap']],
+];
+{
+  const listed = new Set(STYLE_GROUPS.flatMap(([, , ks]) => ks));
+  const rest = Object.keys(STYLES).filter((k) => !listed.has(k));
+  $('styles').innerHTML = [...STYLE_GROUPS, ...(rest.length ? [['More styles', '', rest]] : [])].map(([name, note, keys]) => {
+    const cards = keys.filter((k) => STYLES[k]).map((k) => card('style', k, STYLES[k].label, STYLES[k].note.replace(/, after .*/, ''))).join('');
+    return `<div class="style-group"><h3>${name}</h3>${note ? `<p class="group-note">${note}</p>` : ''}<div class="cards">${cards}</div></div>`;
+  }).join('');
+}
 $('layouts').innerHTML = Object.entries(LAYOUTS).map(([k, l]) => card('layout', k, l, LAYOUT_NOTES[k])).join('');
 $('regions').innerHTML = Object.entries(DETAILS).map(([k, d]) => chip('region', k, d.label, ` title="${d.title}"`)).join('');
 $('sizes').innerHTML = Object.entries(FORMATS).map(([k, f]) => chip('fmt', k, f.short, ` title="${f.label}"`)).join('');
@@ -168,10 +186,24 @@ $('faces').innerHTML = Object.entries(TITLE_FACES).map(([k, f]) => chip('face', 
 $('modes').innerHTML = chip('mode', 'journey', 'The journey') + chip('mode', 'place', 'Any place');
 $('spans').innerHTML = Object.entries(SPANS).map(([k, s]) => chip('span', k, s.label)).join('');
 $('towns').innerHTML = chip('towns', 'on', 'Named') + chip('towns', 'off', 'Hidden');
+const EXTRAS = [['landmarks', 'Landmarks', 'Neighbourhoods in capitals, and churches, halls, museums and parks, each with a small drawn mark'],
+  ['refs', 'Numbered landmarks', 'Landmarks with no room for a name get a number, listed under References'],
+  ['streets', 'Street names', 'Avenues and main streets named along their course'], ['wards', 'Ward colours', 'A colour wash for each quarter']];
+const extrasNow = () => cityExtras(state.style, state.extras);
+$('extras').innerHTML = EXTRAS.map(([k, label, tip]) => `<button class="chip" data-toggle="${k}" aria-pressed="false" title="${tip}">${label}</button>`).join('');
+$('boxes').innerHTML = [['auto', 'Auto', 'The corner with the least land under it'], ['tl', 'Top left'], ['tr', 'Top right'], ['bl', 'Bottom left'], ['br', 'Bottom right']]
+  .map(([k, label, tip]) => chip('box', k, label, tip ? ` title="${tip}"` : '')).join('');
 $('borders').innerHTML = chip('border', 'on', 'Framed') + chip('border', 'off', 'Borderless');
-const GROUP_KEY = { style: 'style', layout: 'layout', region: 'region', fmt: 'fmt', face: 'face', mode: 'mode', span: 'span', towns: 'towns', border: 'border' };
+const GROUP_KEY = { style: 'style', layout: 'layout', region: 'region', fmt: 'fmt', face: 'face', mode: 'mode', span: 'span', towns: 'towns', box: 'box', border: 'border' };
 
 document.querySelector('.panel').addEventListener('click', (e) => {
+  const t = e.target.closest('button[data-toggle]');
+  if (t) {
+    // remember a choice only where it differs from the style's default, so changing style keeps the rest natural
+    const k = t.dataset.toggle, v = !extrasNow()[k];
+    if (v === cityExtras(state.style)[k]) delete state.extras[k]; else state.extras[k] = v;
+    render(); return;
+  }
   const b = e.target.closest('button[data-group]');
   if (!b) return;
   const key = GROUP_KEY[b.dataset.group];
@@ -196,19 +228,28 @@ function syncChooser() {
     b.tabIndex = on ? 0 : -1;
   }
   $('region-row').hidden = state.layout !== 'detail';
+  const X = extrasNow();
+  for (const b of document.querySelectorAll('.panel button[data-toggle]')) {
+    const on = X[b.dataset.toggle];
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on);
+    b.disabled = b.dataset.toggle === 'refs' && !X.landmarks;      // numbers only go on landmarks
+  }
   const f = FORMATS[state.fmt], PLACE = state.mode === 'place', P = state.place;
   $('place-section').hidden = !PLACE;
   $('layout-section').hidden = PLACE;
+  $('extras-row').hidden = !PLACE || SPANS[state.span].km > CITY_KM;
   if (document.activeElement !== $('place-title')) $('place-title').value = P.title;
   if (document.activeElement !== $('place-sub')) $('place-sub').value = P.sub;
   $('summary').textContent = PLACE ? `${P.title} · ${STYLES[state.style].label} · ${f.short}`
     : `${STYLES[state.style].label} · ${LAYOUTS[state.layout]}${state.layout === 'detail' ? ` (${DETAILS[state.region].label})` : ''} · ${f.short}`;
   // keep the address shareable
   const q = new URLSearchParams(PLACE
-    ? { mode: 'place', at: `${P.lat},${P.lon}`, name: P.title, ...(P.sub ? { sub: P.sub } : {}), span: state.span, ...(state.towns === 'off' ? { towns: 'off' } : {}), style: state.style, size: state.fmt }
+    ? { mode: 'place', at: `${P.lat},${P.lon}`, name: P.title, ...(P.sub ? { sub: P.sub } : {}), span: state.span, ...(state.towns === 'off' ? { towns: 'off' } : {}), ...(state.box !== 'auto' ? { box: state.box } : {}), style: state.style, size: state.fmt }
     : { style: state.style, layout: state.layout, size: state.fmt });
   if (!PLACE && state.layout === 'detail') q.set('region', state.region);
   if (state.border === 'off') q.set('border', 'off');
+  if (PLACE) for (const [k, on] of Object.entries(state.extras)) q.set(k, on ? 'on' : 'off');
   if (state.face !== 'didone') q.set('title', state.face);
   history.replaceState(null, '', `?${q}`);
 }
@@ -336,6 +377,98 @@ for (const [id, key] of [['place-title', 'title'], ['place-sub', 'sub']]) {
 }
 
 window.addEventListener('resize', sizePreview);
+
+// ---------- Preview zoom ----------
+// Zooming changes only the preview SVG's viewBox: the vector stays sharp, and the sheet that
+// prints or exports (the `current` markup) is untouched. Pinch or Ctrl/⌘-scroll zooms about the
+// pointer, scrolling or dragging moves about once zoomed in, double-click zooms in there.
+const zoom = {
+  full: null, box: null, raf: 0, MAX: 16,
+  svg() { return $('sheet').querySelector('svg'); },
+  // after each redraw: keep the view if the sheet is the same shape, else show it whole
+  attach() {
+    const svg = this.svg();
+    if (!svg) return;
+    const vb = svg.viewBox.baseVal, full = [vb.x, vb.y, vb.width, vb.height];
+    const same = this.full && this.full.every((v, i) => Math.abs(v - full[i]) < 0.5);
+    this.full = full;
+    if (same && this.box) this.apply(); else this.set(full);
+  },
+  level() { return this.full && this.box ? this.full[2] / this.box[2] : 1; },
+  set([x, y, w]) {
+    const [fx, fy, fw, fh] = this.full;
+    w = Math.min(fw, Math.max(fw / this.MAX, w));
+    const h = (w * fh) / fw;
+    this.box = [Math.min(fx + fw - w, Math.max(fx, x)), Math.min(fy + fh - h, Math.max(fy, y)), w, h];
+    if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; this.apply(); });
+  },
+  apply() {
+    const svg = this.svg();
+    if (!svg || !this.box) return;
+    svg.setAttribute('viewBox', this.box.map((v) => +v.toFixed(2)).join(' '));
+    const z = this.level();
+    $('zoom-level').textContent = `${Math.round(z * 100)}%`;
+    $('zoom-out').disabled = z <= 1.001;
+    $('zoom-in').disabled = z >= this.MAX - 0.01;
+    $('sheet').classList.toggle('zoomed', z > 1.001);
+  },
+  // zoom by `k` keeping the sheet point under (cx, cy) on screen where it is
+  by(k, cx, cy) {
+    const svg = this.svg();
+    if (!svg || !this.box) return;
+    const r = svg.getBoundingClientRect(), [x, y, w, h] = this.box;
+    if (cx === undefined) { cx = r.left + r.width / 2; cy = r.top + r.height / 2; }
+    const u = (cx - r.left) / r.width, v = (cy - r.top) / r.height;
+    const nw = Math.min(this.full[2], Math.max(this.full[2] / this.MAX, w / k)), nh = (nw * h) / w;
+    this.set([x + u * w - u * nw, y + v * h - v * nh, nw]);
+  },
+  // move by a screen distance
+  pan(dx, dy) {
+    const r = this.svg().getBoundingClientRect(), [x, y, w, h] = this.box;
+    this.set([x - (dx * w) / r.width, y - (dy * h) / r.height, w]);
+  },
+};
+$('zoom-in').onclick = () => zoom.by(1.6);
+$('zoom-out').onclick = () => zoom.by(1 / 1.6);
+$('zoom-level').onclick = () => zoom.full && zoom.set(zoom.full);
+$('sheet').addEventListener('wheel', (e) => {
+  if (!zoom.box || document.body.classList.contains('busy')) return;
+  if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoom.by(Math.exp(-e.deltaY * (e.deltaMode ? 0.05 : 0.004)), e.clientX, e.clientY); }
+  else if (zoom.level() > 1.001) { e.preventDefault(); zoom.pan(-e.deltaX, -e.deltaY); }     // zoomed in: scrolling moves the map
+}, { passive: false });
+$('sheet').addEventListener('mousedown', (e) => { if (e.detail > 1) e.preventDefault(); });     // a double-click zooms, it doesn't pick a word
+$('sheet').addEventListener('dblclick', (e) => { window.getSelection()?.removeAllRanges(); if (zoom.box) zoom.by(e.shiftKey ? 1 / 2 : 2, e.clientX, e.clientY); });
+{
+  // drag to move; two fingers pinch
+  const pts = new Map();
+  let pinch = 0;
+  const spread = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  $('sheet').addEventListener('pointerdown', (e) => {
+    if (!zoom.box || (e.pointerType === 'mouse' && (e.button !== 0 || zoom.level() <= 1.001))) return;
+    if (e.pointerType === 'mouse') e.preventDefault();          // no text selection or image drag
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    $('sheet').setPointerCapture(e.pointerId);
+    if (pts.size === 2) pinch = spread();
+    $('sheet').classList.add('dragging');
+  });
+  $('sheet').addEventListener('pointermove', (e) => {
+    const p = pts.get(e.pointerId);
+    if (!p) return;
+    if (pts.size === 1 && zoom.level() > 1.001) zoom.pan(e.clientX - p.x, e.clientY - p.y);
+    p.x = e.clientX; p.y = e.clientY;
+    if (pts.size === 2) {
+      const d = spread(), [a, b] = [...pts.values()];
+      if (pinch) zoom.by(d / pinch, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      pinch = d;
+    }
+  });
+  const up = (e) => { pts.delete(e.pointerId); pinch = 0; if (!pts.size) $('sheet').classList.remove('dragging'); };
+  $('sheet').addEventListener('pointerup', up);
+  $('sheet').addEventListener('pointercancel', up);
+}
+// print the whole sheet, whatever the preview is showing
+window.addEventListener('beforeprint', () => { if (zoom.full) zoom.svg()?.setAttribute('viewBox', zoom.full.join(' ')); });
+window.addEventListener('afterprint', () => zoom.apply());
 $('btn-print').onclick = () => window.print();
 
 // File name without extension, e.g. van-vicharan-antique-classic-11x14

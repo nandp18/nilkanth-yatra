@@ -46,14 +46,15 @@ function tileRange(z, ext) {
 
 let tileUrl = null;
 const tileCache = new Map();                                      // the last 160 decoded tiles
-function tile(z, x, y) {
-  const key = `${z}/${x}/${y}`;
+const BASE = ['transportation', 'waterway', 'water', 'place', 'landcover', 'landuse', 'park', 'boundary'];
+function tile(z, x, y, layers = BASE) {
+  const key = `${z}/${x}/${y}/${layers === BASE ? '' : layers.join()}`;
   if (!tileCache.has(key)) {
     tileCache.set(key, (async () => {
       tileUrl ||= fetch(OFM).then((r) => r.json()).then((j) => j.tiles[0]).catch((e) => { tileUrl = null; throw e; });
       const res = await fetch((await tileUrl).replace('{z}', z).replace('{x}', x).replace('{y}', y));
       if (!res.ok) throw new Error(`tile ${key}: ${res.status}`);
-      return decode(new Uint8Array(await res.arrayBuffer()), ['transportation', 'waterway', 'water', 'place', 'landcover', 'landuse', 'park', 'boundary']);
+      return decode(new Uint8Array(await res.arrayBuffer()), layers);
     })().catch((e) => { tileCache.delete(key); throw e; }));         // a failed tile is fetched again next time
     while (tileCache.size > 160) tileCache.delete(tileCache.keys().next().value);
   }
@@ -120,6 +121,102 @@ export async function osmDetail(ext, pad, km, plan) {
   }
   places.sort((a, b) => a.rank - b.rank || a.order - b.order);
   return { roads, rail, waterways, water, places, parks, bounds, named };
+}
+
+// ---------- Gazetteer: neighbourhoods, landmarks and public grounds ----------
+// The pocket-atlas plans named each quarter of the city in spaced capitals and marked the
+// churches, halls and public buildings with a small drawn house. Those names live in the
+// detailed (z14) tiles; a sheet too wide for that many tiles takes z13, which still has the
+// suburbs, the stations and the historic sites.
+const DISTRICT = { suburb: 1, quarter: 2, neighbourhood: 3 };
+// poi class → [glyph, priority]; lower priorities are placed first
+const LANDMARK = {
+  museum: ['hall', 1], town_hall: ['hall', 1], castle: ['hall', 1], monument: ['monument', 2], college: ['hall', 2],
+  stadium: ['hall', 3], place_of_worship: ['church', 3], hospital: ['hall', 3], railway: ['station', 3],
+  attraction: ['hall', 4], park: ['park', 4], library: ['hall', 5], theatre: ['hall', 5],
+};
+const SITE = { historic_site: 0, 'World Heritage Site': 0, 'National Memorial': 0, national_park: 0, state_park: 1, park: 3 };
+const GROUNDS = new Set(['university', 'college', 'school', 'hospital', 'stadium', 'library']);
+// Names that aren't landmarks: playing fields and play lots tagged as parks, buildings on a campus
+const MINOR = {
+  park: /play ?(lot|ground)|field|courts?$|recreation|rec cent|dog|tot lot|garden$/i,
+  college: /^(?!.*(universit|college|institute|academy|seminary|school of))/i,
+  library: /school|branch|reading room/i,
+};
+const LABEL_LAYERS = ['place', 'poi', 'park', 'landuse', 'transportation_name'];
+// Streets named along their course: the avenues and main streets, not every lane
+const STREET = { trunk: 1, primary: 1, secondary: 2, tertiary: 3 };
+const nameOf = (p) => p['name:en'] || p.name_en || p['name:latin'] || p.name_int || p.name;
+
+export async function osmLandmarks(ext, pad, km) {
+  if (km > 40) return null;
+  const lat = (ext.lat0 + ext.lat1) / 2;
+  let z = Math.max(13, tileZoom(pad, lat, km));
+  if (z < 14 && tileRange(14, pad).count <= 90) z = 14;
+  const { x0, x1, y0, y1 } = tileRange(z, pad), n = 2 ** z, jobs = [];
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) jobs.push(tile(z, x, y, LABEL_LAYERS).then((t) => [x, y, t]));
+  const districts = [], landmarks = [], grounds = [], streets = new Map(), seen = new Set();
+  const inside = (lon, la) => lon > ext.lon0 && lon < ext.lon1 && la > ext.lat0 && la < ext.lat1;
+  for (const [tx, ty, layers] of await Promise.all(jobs)) {
+    for (const [name, L] of Object.entries(layers)) {
+      const toLon = (gx) => ((tx + gx / L.extent) / n) * 360 - 180;
+      const toLat = (gy) => Math.atan(Math.sinh(Math.PI * (1 - (2 * (ty + gy / L.extent)) / n))) / RAD;
+      for (const f of L.features) {
+        const p = f.props;
+        if (name === 'landuse') {
+          if (f.type === 3 && GROUNDS.has(p.class)) grounds.push(f.geometry().filter((g) => g.length >= 6).map((g) => {
+            const s = simplify(g, L.extent / 1500), o = new Array(s.length);
+            for (let i = 0; i < s.length; i += 2) { o[i] = toLon(s[i]); o[i + 1] = toLat(s[i + 1]); }
+            return o;
+          }));
+          continue;
+        }
+        if (name === 'transportation_name') {
+          const label = p.name;                                // the local name: a street sign, not a translation
+          if (f.type !== 2 || !STREET[p.class] || !label || !LATIN.test(label) || p.brunnel === 'tunnel') continue;
+          const st = streets.get(label) || streets.set(label, { name: label, rank: STREET[p.class], parts: [] }).get(label);
+          st.rank = Math.min(st.rank, STREET[p.class]);
+          for (const g of f.geometry()) if (g.length >= 4) {
+            const o = new Array(g.length);
+            for (let i = 0; i < g.length; i += 2) { o[i] = toLon(g[i]); o[i + 1] = toLat(g[i + 1]); }
+            st.parts.push(o);
+          }
+          continue;
+        }
+        if (f.type !== 1) continue;                            // labels are points (the park layer also has its outlines)
+        const label = nameOf(p);
+        if (!label || !LATIN.test(label) || label.length > 34) continue;
+        const [g] = f.geometry(), lon = toLon(g[0]), la = toLat(g[1]);
+        if (!inside(lon, la) || seen.has(label)) continue;     // one mark per name: tiles overlap, and sites come as point and area
+        if (name === 'place') {
+          if (!DISTRICT[p.class]) continue;
+          districts.push({ name: label, lon, lat: la, kind: DISTRICT[p.class], order: p.rank ?? 99 });
+        } else if (name === 'park') {
+          if (!(p.class in SITE)) continue;
+          landmarks.push({ name: label.replace(/ World Heritage Site$/, ''), lon, lat: la, cls: 'site', pri: SITE[p.class], order: 0,
+            glyph: /Memorial/.test(p.class) ? 'monument' : /park/.test(p.class) ? 'park' : 'hall' });
+        } else {
+          const kind = LANDMARK[p.class];
+          if (!kind) continue;
+          if (p.class === 'railway' && p.subclass !== 'station') continue;
+          if (p.class === 'hospital' && p.subclass !== 'hospital') continue;
+          if (p.class === 'library' && p.subclass !== 'library') continue;
+          if (p.class === 'town_hall' && !['townhall', 'courthouse'].includes(p.subclass)) continue;
+          if (MINOR[p.class]?.test(label)) continue;
+          landmarks.push({ name: label, lon, lat: la, cls: p.class, glyph: kind[0], pri: kind[1], order: p.rank ?? 99 });
+        }
+        seen.add(label);
+      }
+    }
+  }
+  districts.sort((a, b) => a.kind - b.kind || a.order - b.order);
+  landmarks.sort((a, b) => a.pri - b.pri || a.order - b.order);
+  // take the kinds in turn, the best of each first, so a city of museums still shows its churches
+  const byKind = new Map();
+  for (const t of landmarks) (byKind.get(t.cls) || byKind.set(t.cls, []).get(t.cls)).push(t);
+  const mixed = [], lists = [...byKind.values()];
+  for (let i = 0; mixed.length < 400 && lists.some((l) => i < l.length); i++) for (const l of lists) if (i < l.length) mixed.push(l[i]);
+  return { districts, landmarks: mixed.slice(0, 400), grounds, streets: [...streets.values()].sort((a, b) => a.rank - b.rank) };
 }
 
 // Open water as OpenStreetMap maps it: sea, rivers and lakes (polygons cut at tile edges) over an

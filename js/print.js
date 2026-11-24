@@ -157,6 +157,20 @@ export const STYLES = {
     fx: { mottle: [0.5, 0.38, 0.2, 0.5, -0.16], grain: [0.35, 0.25, 0.15, 0.6, -0.14], grainOpacity: 0.4,
       vignette: ['#6b3a1a', 0.3], waterLines: 0.4, grat: 0, motifs: 'kalamkari', waves: 'kalamkari', frame: 'kalamkari' },
   },
+  // MacDonald Gill's 1930s pictorial posters: cream land outlined in black, ochre uplands,
+  // an ultramarine sea combed with white waves, dark green trees, and a red poster frame
+  poster: {
+    label: 'Poster', note: 'Cream land on an ultramarine sea in a red frame, after MacDonald Gill’s 1930s pictorial posters',
+    C: { ink: '#1a1816', ink2: '#2e2a26', ink3: '#3b3128', ink4: '#5a4f44', red: '#cf2b2b', water: '#2f56a4',
+      paper: '#f8f2e2', sea: '#3f66b2', seaLine: '#3f66b2', key: '#f8f2e2', seaInk: '#f4f1e6',
+      margin: '#cf2b2b', wave: '#eef3fb', gold: '#e8b24a', green: '#3f8f6e' },
+    paint: {
+      outline: 1, edge: [26, 24, 22],
+      bands: [[0, [248, 242, 226]], [600, [246, 234, 200]], [1400, [239, 200, 135]], [6000, [250, 248, 240]]],
+    },
+    fx: { mottle: [0.3, 0.25, 0.15, 0.25, -0.12], grain: [0.3, 0.25, 0.2, 0.4, -0.12], grainOpacity: 0.22,
+      vignette: null, waterLines: 0, grat: 0, motifs: 'poster', waves: true, frame: 'poster' },
+  },
   // The 1890s city plans of the American atlas houses. Land is a flat tint, with no hill
   // shading, only a touch of shadow on steep ground. On an Any place sheet they add parks and
   // cemeteries, district lines, river names spaced out along the stream, an Explanation and an
@@ -164,11 +178,13 @@ export const STYLES = {
   gazetteer: {
     label: 'Gazetteer', note: 'Fine brown ink on cream, pale blue water, after the 1890s pocket-atlas city maps',
     C: { ink: '#3b2c20', ink2: '#54402f', ink3: '#5e4632', ink4: '#7a6450', red: '#8a2a1a', water: '#46717c',
-      paper: '#f0e4c6', sea: '#bed6d3', seaLine: '#bed6d3', key: '#f3e9cf', shore: '#46717c', park: '#cfd3a8' },
+      paper: '#f0e4c6', sea: '#bed6d3', seaLine: '#bed6d3', key: '#f3e9cf', shore: '#46717c', park: '#cfd3a8',
+      grounds: '#ecc9ad', mark: '#b3573d', tree: '#6f7a45',
+      wards: ['#e9b26f', '#bfcb86', '#e9d77f', '#a5c0c4', '#d2a6bc'] },
     ramp: [[0, [239, 226, 194]], [6600, [239, 226, 194]]],
     tone: (c, hs) => { const s = 1 - 0.5 * Math.max(0, 0.62 - hs); return [c[0] * s, c[1] * s, c[2] * s]; },
     fx: { mottle: [0.42, 0.3, 0.16, 0.28, -0.18], grain: [0.3, 0.22, 0.12, 0.5, -0.14], grainOpacity: 0.3,
-      vignette: ['#6b4a22', 0.22], waterLines: 0.25, grat: 0, period: 'New map of' },
+      vignette: ['#6b4a22', 0.22], waterLines: 0.25, grat: 0, period: 'New map of', landmarks: true },
   },
   cityplan: {
     label: 'City plan', note: 'Mustard wash, green parks and blue water, after the 1890s Matthews-Northrup city plans',
@@ -934,7 +950,7 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
     ${scale}
     ${MAPL ? '' : key}
   </g>
-  ${MAPL && fmt.border === false ? '' : FX.frame === 'miniature' ? miniatureNeatline(F, k) : FX.frame === 'pichwai' ? pichwaiNeatline(F, k) : FX.frame === 'kalamkari' ? kalamkariNeatline(F, k) : neatline(F, px, py, k, fs, EXT)}
+  ${MAPL && fmt.border === false ? '' : FX.frame === 'miniature' ? miniatureNeatline(F, k) : FX.frame === 'pichwai' ? pichwaiNeatline(F, k) : FX.frame === 'kalamkari' ? kalamkariNeatline(F, k) : FX.frame === 'poster' ? posterNeatline(F, k) : neatline(F, px, py, k, fs, EXT)}
 
   ${MAPL ? '' : `<g transform="translate(${f1(F.x)}, ${f1(yLegend)})">
     <line x1="0" y1="0" x2="${fs(56)}" y2="0" stroke="${C.red}" stroke-width="${f1(3 * ts)}" stroke-dasharray="${f1(11 * ts)} ${f1(6 * ts)}"/>
@@ -989,13 +1005,16 @@ export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts =
       .title { font-family: ${face.family}; font-weight: ${face.weight}; text-anchor: middle; }
       .subtitle { font-style: italic; text-anchor: middle; }
       .facts { text-anchor: middle; fill: ${C.ink2}; }
-      .sea { font-style: italic; text-anchor: middle; fill: ${C.water}; }
+      .sea { font-style: italic; text-anchor: middle; fill: ${C.seaInk || C.water}; }
       .range, .region { text-anchor: middle; fill: ${C.ink3}; }
       .region.big { opacity: 0.85; }
       .num { font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 700; text-anchor: middle; }
       .num.end { fill: ${C.key}; }
       .place { font-style: italic; paint-order: stroke; stroke: ${C.paper}; stroke-width: ${fs(5)}px; stroke-linejoin: round; }
       .place.minor { fill: ${C.ink2}; stroke-width: ${fs(4)}px; }
+      .district { font-family: 'IM Fell English SC', 'IM Fell English', Georgia, serif; text-anchor: middle; fill: ${C.ink3}; paint-order: stroke; stroke: ${C.paper}; stroke-opacity: 0.6; stroke-width: ${fs(3)}px; stroke-linejoin: round; }
+      .street { font-style: italic; text-anchor: middle; fill: ${C.ink2}; paint-order: stroke; stroke: ${C.paper}; stroke-opacity: 0.7; stroke-width: ${fs(2.5)}px; stroke-linejoin: round; }
+      .mark { font-style: italic; fill: ${C.ink2}; paint-order: stroke; stroke: ${C.paper}; stroke-width: ${fs(3.5)}px; stroke-linejoin: round; }
       .annot { font-style: italic; fill: ${C.red}; paint-order: stroke; stroke: ${C.paper}; stroke-width: ${fs(5)}px; }
       .deg { text-anchor: middle; fill: ${C.ink2}; }
       .key-title { text-anchor: middle; }
@@ -1016,7 +1035,7 @@ export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts =
 
   <rect width="${W}" height="${H}" fill="${C.paper}"/>
   ${FX.mottle ? `<rect width="${W}" height="${H}" filter="url(#mottle)"/>` : ''}
-  ${fmt.border === false || opts.border === false ? '' : FX.frame === 'miniature' ? miniatureBorder(W, H, k) : FX.frame === 'pichwai' ? pichwaiBorder(W, H, k) : FX.frame === 'kalamkari' ? kalamkariBorder(W, H, k) : border(W, H, k)}
+  ${fmt.border === false || opts.border === false ? '' : FX.frame === 'miniature' ? miniatureBorder(W, H, k) : FX.frame === 'pichwai' ? pichwaiBorder(W, H, k) : FX.frame === 'kalamkari' ? kalamkariBorder(W, H, k) : FX.frame === 'poster' ? posterBorder(W, H, k) : border(W, H, k)}
 `;
 }
 export function sheetClose(W, H, FX) {
@@ -1170,6 +1189,18 @@ function miniatureNeatline(F, k) {
   return `<rect x="${f1(x - t)}" y="${f1(y - t)}" width="${f1(w + 2 * t)}" height="${f1(h + 2 * t)}" fill="none" stroke="${C.lapis}" stroke-width="${f1(5 * k)}"/>
   <rect x="${f1(x)}" y="${f1(y)}" width="${f1(w)}" height="${f1(h)}" fill="none" stroke="${C.red}" stroke-width="${f1(1.6 * k)}"/>`;
 }
+// Poster: a broad red margin, a cream rule, then a heavy black band round the picture
+function posterBorder(W, H, k) {
+  const o = 44 * k;
+  const r = (inset, stroke, w) => `<rect x="${f1(inset)}" y="${f1(inset)}" width="${f1(W - 2 * inset)}" height="${f1(H - 2 * inset)}" fill="none" stroke="${stroke}" stroke-width="${f1(w)}"/>`;
+  return `<path d="M0,0H${W}V${H}H0Z M${f1(o)},${f1(o)}V${f1(H - o)}H${f1(W - o)}V${f1(o)}Z" fill="${C.margin}" fill-rule="evenodd"/>`
+    + r(o + 3 * k, C.paper, 6 * k) + r(o + 11 * k, C.ink, 10 * k);
+}
+function posterNeatline(F, k) {
+  const { x, y, w, h } = F, t = 6 * k;
+  return `<rect x="${f1(x - t)}" y="${f1(y - t)}" width="${f1(w + 2 * t)}" height="${f1(h + 2 * t)}" fill="none" stroke="${C.ink}" stroke-width="${f1(7 * k)}"/>
+  <rect x="${f1(x)}" y="${f1(y)}" width="${f1(w)}" height="${f1(h)}" fill="none" stroke="${C.ink}" stroke-width="${f1(1.4 * k)}"/>`;
+}
 // Water as miniatures paint it: rows of small scalloped ripples
 function wavePattern(k) {
   const w = 34 * k, h = 20 * k, a = w / 4;
@@ -1177,10 +1208,20 @@ function wavePattern(k) {
   return `<pattern id="waves" width="${f1(w)}" height="${f1(h)}" patternUnits="userSpaceOnUse">
     <path d="${row(h * 0.45, 0)} ${row(h * 0.95, a)}" fill="none" stroke="${C.wave}" stroke-opacity="0.5" stroke-width="${f1(1.1 * k)}" stroke-linecap="round"/></pattern>`;
 }
+// Steady 0–1 value from a motif's position
+function keepTree(lon, lat) {
+  let h = (Math.round(lon * 1e4) * 374761393 + Math.round(lat * 1e4) * 668265263) | 0;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
 // Painted motifs, drawn back to front, kept clear of the route, stops and furniture
 function paintMotifs(list, px, py, ts, discs, R, obstacles, kind = true, route = ROUTE) {
   const pts = route.map(([lo, la]) => [px(lo), py(la)]);
   const clearR = 14 * ts, stopR = R * 2.4;
+  // Poster: flat colour wants open ground, so only about one tree in four is kept (chosen by
+  // position, so the same trees survive every redraw); peaks and hills stay as they are
+  if (kind === 'poster') list = list.filter((m) => (m.t !== 'tree' && m.t !== 'cypress') || keepTree(m.lon, m.lat) < 0.27);
   const items = list.map((m) => ({ ...m, x: px(m.lon), y: py(m.lat) })).filter((m) => {
     const hw = 22 * ts * m.s;
     if (obstacles.some((b) => m.x + hw > b[0] && m.x - hw < b[2] && m.y > b[1] && m.y - hw * 1.6 < b[3])) return false;
@@ -1332,6 +1373,7 @@ export async function embedFonts(svg) {
 // Point the drawing palette at a style and return it
 function useStyle(styleKey) {
   const S = STYLES[styleKey] || STYLES.antique;
+  for (const key of Object.keys(C)) delete C[key];          // no colour left over from the last style
   Object.assign(C, S.C);
   return S;
 }
@@ -1365,5 +1407,5 @@ export const kit = {
   useStyle, styleColor, TITLE_FACES,
   // for the any-place sheets (js/print-place.js)
   mapFrame, rel_, paintMotifs,
-  styleNeatline: (FX, F, k) => (FX.frame === 'miniature' ? miniatureNeatline(F, k) : FX.frame === 'pichwai' ? pichwaiNeatline(F, k) : FX.frame === 'kalamkari' ? kalamkariNeatline(F, k) : null),
+  styleNeatline: (FX, F, k) => (FX.frame === 'miniature' ? miniatureNeatline(F, k) : FX.frame === 'pichwai' ? pichwaiNeatline(F, k) : FX.frame === 'kalamkari' ? kalamkariNeatline(F, k) : FX.frame === 'poster' ? posterNeatline(F, k) : null),
 };

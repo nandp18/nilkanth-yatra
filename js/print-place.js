@@ -5,10 +5,10 @@
 // any view when those tiles can't be reached, take rivers, lakes and towns from Natural
 // Earth. Everything is fetched on demand. Units match print.js: hundredths of an inch.
 import { kit, STYLES, relief, elevationData, elevationSampler, tileCount, due, pause } from './print.js';
-import { osmPlan, osmDetail, seaPolygons } from './print-osm.js';
+import { osmPlan, osmDetail, osmLandmarks, seaPolygons } from './print-osm.js';
 
 const {
-  C, RAD, mercY, latOfMerc, f1, esc, clamp, textWidth, FELL_I, boxHit, ornamentRule, compassRose,
+  C, RAD, mercY, latOfMerc, f1, esc, clamp, textWidth, FELL_I, FELL_SC, boxHit, ornamentRule, compassRose,
   sheetOpen, sheetClose, useStyle, TITLE_FACES, mapFrame, rel_, paintMotifs, styleNeatline,
 } = kit;
 
@@ -168,15 +168,18 @@ const lineParts = (g) => (!g ? [] : g.type === 'LineString' ? [g.coordinates] : 
 const polyParts = (g) => (!g ? [] : g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : []);
 
 const NONE = { streams: [], water: [], roads: {}, rail: [], parks: [], bounds: [], named: new Map(), osm: false };
-async function vectors(ext, pad, wantTowns) {
+async function vectors(ext, pad, wantTowns, wantMarks) {
   const dLon = ext.lon1 - ext.lon0;
   const km = dLon * 111.32 * Math.cos(((ext.lat0 + ext.lat1) / 2) * RAD), plan = osmPlan(km);
   if (plan) {
+    // the gazetteer's quarters and landmarks: a sheet without them is still a good map
+    const marks = wantMarks ? osmLandmarks(ext, pad, km).catch((err) => { console.warn('Landmarks unavailable', err); return null; }) : null;
     try {
-      const o = await osmDetail(ext, pad, km, plan);
+      const o = await osmDetail(ext, pad, km, plan), lm = await marks;
+      const places = o.places;
       return { osm: true, rivers: [...(o.waterways.river || []), ...(o.waterways.canal || [])], streams: o.waterways.stream || [],
-        lakes: [], water: o.water, roads: o.roads, rail: o.rail, towns: wantTowns ? o.places.slice(0, 80) : [],
-        parks: o.parks, bounds: o.bounds, named: o.named };
+        lakes: [], water: o.water, roads: o.roads, rail: o.rail, towns: wantTowns ? places.slice(0, 120) : [],
+        parks: o.parks, bounds: o.bounds, named: o.named, districts: lm?.districts || [], landmarks: lm?.landmarks || [], grounds: lm?.grounds || [], streets: lm?.streets || [] };
     } catch (err) { console.warn('OpenStreetMap detail unavailable; drawing from Natural Earth', err); }
   }
   return { ...NONE, ...(await naturalEarth(ext, pad, wantTowns)) };
@@ -216,9 +219,10 @@ async function naturalEarth(ext, pad, wantTowns) {
 
 // ---------- Draw ----------
 // place: { lat, lon, title, sub }; opts: { span (a SPANS key), towns, progress, alive }
-export async function drawPlace(fmt, faceKey, styleKey, place, { span = 300, towns = true, progress, alive = () => true } = {}) {
+export async function drawPlace(fmt, faceKey, styleKey, place, { span = 300, towns = true, extras = {}, box = 'auto', progress, alive = () => true } = {}) {
   const ext = placeExtent(fmt, place.lat, place.lon, SPANS[span].km), pad = padExtent(ext), z = placeZoom(fmt, ext, pad);
-  const vec = vectors(ext, pad, towns);                    // alongside the tiles
+  const X = cityExtras(styleKey, extras);
+  const vec = vectors(ext, pad, towns, X.landmarks || X.wards || X.streets);                  // alongside the tiles
   vec.catch(() => {});                                     // handled where it's awaited
   const sea = seaPolygons(pad, SPANS[span].km).catch((err) => { console.warn('OpenStreetMap coastline unavailable; tracing it from elevation', err); return null; });
   const engraving = progress?.('Engraving relief');
@@ -236,7 +240,7 @@ export async function drawPlace(fmt, faceKey, styleKey, place, { span = 300, tow
   const geo = { land, landAt: (lon, lat) => sample(lon, lat) > 0.5, ...(await vec) };
   await document.fonts.ready;
   if (!alive()) return null;
-  return buildPlace(fmt, faceKey, styleKey, rel, ext, place, geo);
+  return buildPlace(fmt, faceKey, styleKey, rel, ext, place, geo, X, box);
 }
 
 // Vertical exaggeration of the hillshade. Steep country keeps the usual setting for its zoom;
@@ -271,7 +275,9 @@ const degLabel = (v, step, pos, neg) => {
   return `${Math.floor(m / 60)}° ${String(m % 60).padStart(2, '0')}′ ${h}`;
 };
 
-export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo) {
+// box: where the title box goes, 'auto' or a corner (BOX_CORNERS)
+export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo, extras = {}, box = 'auto') {
+  const X = cityExtras(styleKey, extras);
   const S = useStyle(styleKey), FX = S.fx;
   const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100), k = W / 1800, ts = k;
   const fs = (u) => f1(u * ts);
@@ -308,6 +314,12 @@ export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo) 
   // Gated on the style's own colours: C is shared, and keeps keys from the last style used.
   const P = FX.period, SC = S.C;
   const parks = SC.park ? (geo.parks || []).map((poly) => poly.map((r) => pathOf(r, true)).join('')).join('') : '';
+  // the city details take the style's own colours where it has them, else colours drawn from its palette
+  if (X.landmarks || X.wards) cityColours(SC);
+  const grounds = X.landmarks ? (geo.grounds || []).map((poly) => poly.map((r) => pathOf(r, true)).join('')).join('') : '';
+  const marks = X.landmarks ? geo.landmarks || [] : [], quarters = X.landmarks || X.wards ? geo.districts || [] : [];
+  // with quarters named in capitals, suburbs leave the dotted towns
+  const towns = quarters.length ? geo.towns.filter((t) => t.rank !== 5 && t.rank !== 7) : geo.towns;
   let bounds = '';
   if (SC.bound) for (const [lv, rw, lw] of [[10, 3.5, 0.6], [8, 4.5, 0.7], [7, 4.5, 0.7], [6, 8, 1], [4, 10, 1.2], [2, 12, 1.4]]) {
     if (lv === 10 && !FX.wards) continue;                  // wards and neighbourhoods: the ward map only
@@ -317,73 +329,128 @@ export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo) 
   const legendRows = !P ? [] : [
     (geo.roads?.minor?.length || geo.roads?.tertiary?.length) && ['street', 'Streets and roads'],
     major && ['major', 'Highways'], rail && ['rail', 'Railroads'],
-    parks && ['park', 'Parks and cemeteries'], bounds && ['bound', FX.wards ? 'Ward and district lines' : 'County and township lines'],
+    parks && ['park', 'Parks and cemeteries'], grounds && ['grounds', 'Colleges, hospitals and schools'],
+    marks.some((t) => t.glyph === 'church') && ['church', 'Churches'], marks.some((t) => t.glyph === 'hall' || t.glyph === 'station') && ['hall', 'Public buildings'],
+    bounds && ['bound', FX.wards ? 'Ward and district lines' : 'County and township lines'],
   ].filter(Boolean);
   const legendH = legendRows.length ? fs(50) + legendRows.length * fs(28) : 0;
 
-  // --- cartouche: sized to the title, set in the corner with the least land under it; the rose takes another ---
+  // --- the layout: cartouche and rose, then the names. Landmarks with no room for a name get a
+  // number, listed under References in the cartouche; the cartouche is sized for that list, so
+  // the names are set twice: once to count the numbers, once with the room for them.
   const title = (place.title || '').trim() || 'Untitled', sub = (place.sub || '').trim();
-  const titleFont = `${face.weight} $px ${face.family}`, maxW = F.w * 0.66;
-  let tSize = fs(100 * face.scale), sSize = fs(25);
-  const tw = textWidth(title, titleFont, tSize, face.track * ts), sw = textWidth(sub, FELL_I, sSize);
-  const cart = { w: clamp(Math.max(tw + fs(90), sw + fs(80)), fs(560), maxW), h: fs(372) + legendH };
-  if (tw + fs(90) > cart.w) tSize = f1((tSize * (cart.w - fs(90))) / tw);
-  if (sw + fs(80) > cart.w) sSize = f1((sSize * (cart.w - fs(80))) / sw);
-  const landUnder = (x0, y0, x1, y1) => {
-    let c = 0;
-    for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) c += geo.landAt(lonAt(x0 + ((i + 0.5) / 6) * (x1 - x0)), latAt(y0 + ((j + 0.5) / 6) * (y1 - y0))) ? 1 : 0;
-    return c / 36;
-  };
-  const m = fs(40), roseR = 92 * ts, rr = roseR * 1.5;
-  const corners = [[F.x + m, bottom - m - cart.h], [F.x + F.w - m - cart.w, bottom - m - cart.h], [F.x + m, F.y + m + fs(30)], [F.x + F.w - m - cart.w, F.y + m + fs(30)]];
-  const cScore = corners.map(([x, y], i) => landUnder(x, y, x + cart.w, y + cart.h) + i * 0.02);
-  const best = cScore.indexOf(Math.min(...cScore));
-  [cart.x, cart.y] = corners[best];
-  const rc = [[F.x + rr, bottom - rr], [F.x + F.w - rr, bottom - rr], [F.x + rr, F.y + rr * 1.2], [F.x + F.w - rr, F.y + rr * 1.2]];
-  const rScore = rc.map(([x, y], i) => (i === best ? Infinity : landUnder(x - roseR, y - roseR * 1.3, x + roseR, y + roseR) + [0.06, 0.04, 0.02, 0][i]));
-  const [rcx, rcy] = rc[rScore.indexOf(Math.min(...rScore))];
+  const KEY_MAX = X.landmarks && X.refs ? 24 : 0, keyH = (n) => (n ? fs(46) + Math.ceil(n / 2) * fs(19) : 0);
+  const layout = (keyCap) => {
+    // --- cartouche: sized to the title, set in the corner with the least land under it; the rose takes another ---
+    const titleFont = `${face.weight} $px ${face.family}`, maxW = F.w * 0.66;
+    let tSize = fs(100 * face.scale), sSize = fs(25);
+    const tw = textWidth(title, titleFont, tSize, face.track * ts), sw = textWidth(sub, FELL_I, sSize);
+    const cart = { w: clamp(Math.max(tw + fs(90), sw + fs(80)), fs(560), maxW), h: fs(372) + legendH + keyH(keyCap) };
+    if (tw + fs(90) > cart.w) tSize = f1((tSize * (cart.w - fs(90))) / tw);
+    if (sw + fs(80) > cart.w) sSize = f1((sSize * (cart.w - fs(80))) / sw);
+    const landUnder = (x0, y0, x1, y1) => {
+      let c = 0;
+      for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) c += geo.landAt(lonAt(x0 + ((i + 0.5) / 6) * (x1 - x0)), latAt(y0 + ((j + 0.5) / 6) * (y1 - y0))) ? 1 : 0;
+      return c / 36;
+    };
+    const m = fs(40), rr = roseR * 1.5;
+    const corners = [[F.x + m, bottom - m - cart.h], [F.x + F.w - m - cart.w, bottom - m - cart.h], [F.x + m, F.y + m + fs(30)], [F.x + F.w - m - cart.w, F.y + m + fs(30)]];
+    const cScore = corners.map(([x, y], i) => landUnder(x, y, x + cart.w, y + cart.h) + i * 0.02);
+    const best = BOX_CORNERS.includes(box) ? BOX_CORNERS.indexOf(box) : cScore.indexOf(Math.min(...cScore));
+    [cart.x, cart.y] = corners[best];
+    const rc = [[F.x + rr, bottom - rr], [F.x + F.w - rr, bottom - rr], [F.x + rr, F.y + rr * 1.2], [F.x + F.w - rr, F.y + rr * 1.2]];
+    const rScore = rc.map(([x, y], i) => (i === best ? Infinity : landUnder(x - roseR, y - roseR * 1.3, x + roseR, y + roseR) + [0.06, 0.04, 0.02, 0][i]));
+    const [rcx, rcy] = rc[rScore.indexOf(Math.min(...rScore))];
 
-  const obstacles = [[F.x - 1e4, F.y - 1e4, F.x + F.w + 1e4, F.y + 4], [F.x - 1e4, bottom - 4, F.x + F.w + 1e4, bottom + 1e4],
-    [F.x - 1e4, F.y, F.x + 4, bottom], [F.x + F.w - 4, F.y, F.x + F.w + 1e4, bottom],
-    [cart.x - 8, cart.y - 8, cart.x + cart.w + 8, cart.y + cart.h + 8], [rcx - roseR, rcy - roseR * 1.3, rcx + roseR, rcy + roseR]];
+    const obstacles = [[F.x - 1e4, F.y - 1e4, F.x + F.w + 1e4, F.y + 4], [F.x - 1e4, bottom - 4, F.x + F.w + 1e4, bottom + 1e4],
+      [F.x - 1e4, F.y, F.x + 4, bottom], [F.x + F.w - 4, F.y, F.x + F.w + 1e4, bottom],
+      [cart.x - 8, cart.y - 8, cart.x + cart.w + 8, cart.y + cart.h + 8], [rcx - roseR, rcy - roseR * 1.3, rcx + roseR, rcy + roseR]];
 
-  // --- names: the place first, then towns by importance, each on whichever side is free ---
-  const placed = [];
-  let names = '', dots = '';
-  const label = (x, y, text, size, cls, gap, avoid = []) => {
-    const wdt = textWidth(text, FELL_I, size), hgt = size * 0.92;
-    const cand = [
-      [x + gap, y - hgt * 0.62, x + gap + wdt, y + hgt * 0.38, 'start', x + gap, y + hgt * 0.3],
-      [x - gap - wdt, y - hgt * 0.62, x - gap, y + hgt * 0.38, 'end', x - gap, y + hgt * 0.3],
-      [x - wdt / 2, y - gap - hgt, x + wdt / 2, y - gap, 'middle', x, y - gap - hgt * 0.15],
-      [x - wdt / 2, y + gap, x + wdt / 2, y + gap + hgt, 'middle', x, y + gap + hgt * 0.8],
-    ];
-    for (const b of cand) {
-      const box = b.slice(0, 4);
-      if (obstacles.some((o) => boxHit(box, o)) || placed.some((o) => boxHit(box, o)) || avoid.some((o) => boxHit(box, o))) continue;
-      placed.push(box);
-      names += `<text class="${cls}" x="${f1(b[5])}" y="${f1(b[6])}" text-anchor="${b[4]}" style="font-size:${size}px">${esc(text)}</text>`;
-      return true;
+    // --- names: the place first, then towns by importance, each on whichever side is free ---
+    const placed = [];
+    let names = '', dots = '';
+    // `measure` stands in for text not yet known (a landmark's number) when sizing its box
+    const label = (x, y, text, size, cls, gap, avoid = [], measure = text) => {
+      const wdt = textWidth(measure, FELL_I, size), hgt = size * 0.92;
+      const cand = [
+        [x + gap, y - hgt * 0.62, x + gap + wdt, y + hgt * 0.38, 'start', x + gap, y + hgt * 0.3],
+        [x - gap - wdt, y - hgt * 0.62, x - gap, y + hgt * 0.38, 'end', x - gap, y + hgt * 0.3],
+        [x - wdt / 2, y - gap - hgt, x + wdt / 2, y - gap, 'middle', x, y - gap - hgt * 0.15],
+        [x - wdt / 2, y + gap, x + wdt / 2, y + gap + hgt, 'middle', x, y + gap + hgt * 0.8],
+      ];
+      for (const b of cand) {
+        const box = b.slice(0, 4);
+        if (obstacles.some((o) => boxHit(box, o)) || placed.some((o) => boxHit(box, o)) || avoid.some((o) => boxHit(box, o))) continue;
+        placed.push(box);
+        names += `<text class="${cls}" x="${f1(b[5])}" y="${f1(b[6])}" text-anchor="${b[4]}" style="font-size:${size}px">${esc(text)}</text>`;
+        return true;
+      }
+      return false;
+    };
+    const pin = [mx - R - 1, my - R - 1, mx + R + 1, my + R + 1];
+    label(mx, my, title, fs(21), 'place', R + fs(5));
+    let shown = 0;
+    for (const t of towns) {
+      if (shown >= 32) break;
+      const x = px(t.lon), y = py(t.lat), r = 3.2 * ts;
+      if (Math.hypot(x - mx, y - my) < R * 2.6) continue;                           // the place itself, or right beside it
+      if (t.name.toLowerCase() === title.toLowerCase() && Math.hypot(x - mx, y - my) < F.w * 0.12) continue;
+      const dot = [x - r - 1, y - r - 1, x + r + 1, y + r + 1];
+      if (obstacles.some((o) => boxHit(dot, o)) || placed.some((o) => boxHit(dot, o))) continue;
+      const big = t.rank <= 2;
+      if (!label(x, y, t.name, fs(big ? 18 : 15), big ? 'place' : 'place minor', r + fs(4), [pin])) continue;
+      placed.push(dot);
+      dots += `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r)}" fill="${C.ink}" stroke="${C.paper}" stroke-width="${f1(1.2 * ts)}"/>`;
+      shown++;
     }
-    return false;
+    // --- the gazetteer: quarters of the city in spaced capitals, then landmarks, each a small drawn mark ---
+    let quarterNames = '', markSvg = '';
+    const wardSites = [];
+    for (const q of quarters) {
+      if (wardSites.length >= 36) break;
+      const x = px(q.lon), y = py(q.lat), size = fs(q.kind === 1 ? 19 : q.kind === 2 ? 16 : 14), track = size * (q.kind === 1 ? 0.45 : 0.3);
+      const text = q.name.toUpperCase(), words = text.split(' ');
+      const lines = [[text]];
+      if (words.length > 1) { const h = Math.ceil(words.length / 2); lines.push([words.slice(0, h).join(' '), words.slice(h).join(' ')]); }
+      for (const ls of lines) {
+        const wdt = Math.max(...ls.map((t) => textWidth(t, FELL_SC, size, track))), lh = size * 1.1, hgt = lh * ls.length;
+        const box = [x - wdt / 2 - size * 0.5, y - hgt / 2, x + wdt / 2 + size * 0.5, y + hgt / 2];   // a word's space either side
+        if (obstacles.some((o) => boxHit(box, o)) || placed.some((o) => boxHit(box, o))) continue;
+        placed.push(box);
+        quarterNames += ls.map((t, i) => `<text class="district" x="${f1(x + track / 2)}" y="${f1(y - hgt / 2 + lh * (i + 0.78))}" style="font-size:${size}px;letter-spacing:${f1(track)}px">${esc(t)}</text>`).join('');
+        wardSites.push({ x, y });
+        break;
+      }
+    }
+    let mShown = 0;
+    const keyed = [];
+    for (const t of marks) {
+      if (mShown >= 48 && keyed.length >= keyCap) break;
+      const x = px(t.lon), y = py(t.lat), g = 5.5 * ts;
+      if (Math.hypot(x - mx, y - my) < R * 2.2) continue;
+      const box = [x - g, y - g * 1.4, x + g, y + g * 0.6];
+      if (obstacles.some((o) => boxHit(box, o)) || placed.some((o) => boxHit(box, o))) continue;
+      if (mShown < 48 && label(x, y - g * 0.3, t.name, fs(12.5), 'mark', g + fs(3), [pin])) mShown++;
+      else if (keyed.length < keyCap && label(x, y - g * 0.3, `@@${keyed.length}@@`, fs(12), 'mark num', g + fs(2), [pin], '00')) keyed.push({ name: t.name, x, y });
+      else continue;
+      placed.push(box);
+      markSvg += glyph(t.glyph, x, y, g, k);
+    }
+    return { cart, tSize, sSize, rcx, rcy, obstacles, placed, names, dots, quarterNames, markSvg, keyed, wardSites };
   };
-  const pin = [mx - R - 1, my - R - 1, mx + R + 1, my + R + 1];
-  label(mx, my, title, fs(21), 'place', R + fs(5));
-  let shown = 0;
-  for (const t of geo.towns) {
-    if (shown >= 32) break;
-    const x = px(t.lon), y = py(t.lat), r = 3.2 * ts;
-    if (Math.hypot(x - mx, y - my) < R * 2.6) continue;                           // the place itself, or right beside it
-    if (t.name.toLowerCase() === title.toLowerCase() && Math.hypot(x - mx, y - my) < F.w * 0.12) continue;
-    const dot = [x - r - 1, y - r - 1, x + r + 1, y + r + 1];
-    if (obstacles.some((o) => boxHit(dot, o)) || placed.some((o) => boxHit(dot, o))) continue;
-    const big = t.rank <= 2;
-    if (!label(x, y, t.name, fs(big ? 18 : 15), big ? 'place' : 'place minor', r + fs(4), [pin])) continue;
-    placed.push(dot);
-    dots += `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r)}" fill="${C.ink}" stroke="${C.paper}" stroke-width="${f1(1.2 * ts)}"/>`;
-    shown++;
-  }
+  const roseR = 92 * ts;
+  let lay = layout(KEY_MAX);
+  // size the cartouche for the numbers actually used, and set the names again around it
+  const used = lay.keyed.length;
+  if (used < KEY_MAX) lay = layout(used);
+  const { cart, tSize, sSize, rcx, rcy, obstacles, placed, dots, quarterNames, markSvg, keyed, wardSites } = lay;
+  // number the landmarks as they read, in bands down the sheet, left to right within each
+  const band = fs(160), order = keyed.map((t, i) => i).sort((a, b) => Math.floor(keyed[a].y / band) - Math.floor(keyed[b].y / band) || keyed[a].x - keyed[b].x);
+  const num = []; order.forEach((i, n) => { num[i] = n + 1; });
+  const names = lay.names.replace(/@@(\d+)@@/g, (_, i) => num[i]);
+  const refs = order.map((i) => keyed[i].name);
   const riverNames = P ? nameRivers(geo.named, px, py, fs, F, obstacles, placed) : '';
+  const streetNames = X.streets ? nameStreets(geo.streets, px, py, fs, F, obstacles, placed) : '';
   const marker = `<circle cx="${f1(mx)}" cy="${f1(my)}" r="${f1(R)}" fill="${C.red}" stroke="${C.ink}" stroke-width="${f1(1.4 * ts)}"/>
     <circle cx="${f1(mx)}" cy="${f1(my)}" r="${f1(R * 0.36)}" fill="${C.key}"/>`;
 
@@ -464,12 +531,14 @@ export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo) 
     ${ornamentRule(cx, ySub + fs(18), fs(150), ts)}
     <text class="facts" x="${f1(cx)}" y="${f1(yFacts)}" style="font-size:${fs(17)}px;letter-spacing:${fs(4)}px">${dm(place.lat, 'N', 'S')} · ${dm(place.lon, 'E', 'W')}</text>
     ${legendRows.length ? explanation(legendRows, cx, yFacts + fs(48), fs, k, FX.wards) : ''}
+    ${refs.length ? references(refs, cart.x + fs(34), cart.w - fs(68), yFacts + fs(48) + legendH, fs) : ''}
     <text class="credit" x="${f1(cx)}" y="${f1(cart.y + cart.h - fs(22))}" text-anchor="middle" style="font-size:${fs(11)}px">${geo.osm
     ? 'Relief: Mapzen · OpenFreeMap © OpenMapTiles · Data © OpenStreetMap contributors'
     : 'Relief: Mapzen Terrain Tiles · Rivers, lakes &amp; towns: Natural Earth'}</text>`;
 
   const rel = rel_(reliefData, px, py);
   const frameRect = `x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}"`;
+  const wardSvg = X.wards ? wardTints(wardSites, C.wards, k) : '';
   const motifSvg = FX.motifs ? paintMotifs(reliefData.motifs || [], px, py, ts, [{ x: mx, y: my }], R, [...obstacles, ...placed], FX.motifs, []) : '';
 
   return `${sheetOpen(fmt, W, H, k, ts, fs, face, FX, `<clipPath id="frame"><rect ${frameRect}/></clipPath>
@@ -487,7 +556,9 @@ export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo) 
       <use href="#landp" fill="none" stroke="${C.ink3}" stroke-width="${f1(16 * k)}" stroke-opacity="0.32" filter="url(#bleed)"/>` : ''}
     </g>
     <path d="${grat}" fill="none" stroke="${C.ink}" stroke-opacity="${FX.grat}" stroke-width="${f1(0.8 * k)}"/>
+    ${wardSvg ? `<g clip-path="url(#land)">${wardSvg}</g>` : ''}
     ${parks ? `<path d="${parks}" fill="${C.park}"/>` : ''}
+    ${grounds ? `<path d="${grounds}" fill="${C.grounds}" fill-opacity="${C.groundsOpacity || 1}" stroke="${C.mark}" stroke-opacity="0.55" stroke-width="${f1(0.5 * k)}"/>` : ''}
     ${bounds ? `<g clip-path="url(#land)">${bounds}</g>` : ''}
     ${water ? `<path d="${water}" fill="${C.sea}"/>` : ''}
     ${streams ? `<path d="${streams}" fill="none" stroke="${C.water}" stroke-width="${f1(0.8 * k)}" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round"/>` : ''}
@@ -496,7 +567,10 @@ export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo) 
     ${roads}
     <use href="#landp" fill="none" stroke="${SC.shore || C.ink}" stroke-width="${f1(1.6 * k)}" stroke-linejoin="round"/>
     ${riverNames}
+    ${streetNames}
     ${motifSvg}
+    ${quarterNames}
+    ${markSvg}
     ${dots}
     ${marker}
     ${names}
@@ -596,6 +670,141 @@ function smooth(pts, r) {
     return [sx / c, sy / c];
   });
 }
+// ---------- City details: which are on, and their colours ----------
+// Each detail is on unless switched off, except ward colours, which suit the flat-tinted city
+// plans: on by default only where a style carries its own wash colours.
+export const CITY_KM = 40;
+// The title box's corners, in the order buildPlace tries them
+export const BOX_CORNERS = ['bl', 'br', 'tl', 'tr'];                                   // wider sheets have none of these details
+export function cityExtras(styleKey, extras = {}) {
+  const own = !!STYLES[styleKey]?.C.wards, pick = (k, d) => (typeof extras[k] === 'boolean' ? extras[k] : d);
+  return { landmarks: pick('landmarks', true), refs: pick('refs', true), streets: pick('streets', true), wards: pick('wards', own) };
+}
+const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+const mix = (a, b, t) => `#${hex(a).map((v, i) => Math.round(v + (hex(b)[i] - v) * t).toString(16).padStart(2, '0')).join('')}`;
+const WARD_HUES = ['#e9a85f', '#a8c46c', '#e8d36a', '#7fb3c4', '#cf94b8'];
+// Fill in the shared palette C for a style with no city colours of its own: landmarks in its
+// accent, grounds a pale tint of it, trees green, washes in five hues toned to its paper
+function cityColours(SC) {
+  const dark = hex(SC.paper).reduce((a, v) => a + v, 0) < 3 * 110;
+  C.mark ||= SC.red;
+  C.grounds ||= mix(SC.red, SC.paper, dark ? 0.62 : 0.72);
+  C.groundsOpacity ||= dark ? 0.45 : 1;              // on a dark sheet a solid fill would glare
+  C.tree ||= SC.green || mix('#4d7a3a', SC.paper, dark ? 0.25 : 0.05);
+  C.wards ||= WARD_HUES.map((h) => mix(h, SC.paper, dark ? 0.3 : 0.1));
+}
+// Street names in small italics along the avenues and main streets: each on the straightest
+// stretch of its longest run that holds the name, clear of everything already named
+function nameStreets(streets, px, py, fs, F, obstacles, placed) {
+  if (!streets?.length) return '';
+  const runs = [];
+  for (const st of streets) {
+    const pts = st.parts.map((r) => { const out = []; for (let i = 0; i < r.length; i += 2) out.push([px(r[i]), py(r[i + 1])]); return out; });
+    for (const run of joinRuns(pts, 1.5)) {
+      let len = 0;
+      for (let i = 1; i < run.length; i++) len += Math.hypot(run[i][0] - run[i - 1][0], run[i][1] - run[i - 1][1]);
+      runs.push({ name: st.name, rank: st.rank, run, len });
+    }
+  }
+  runs.sort((a, b) => a.rank - b.rank || b.len - a.len);
+  const done = new Set();
+  let defs = '', text = '', id = 0;
+  for (const { name, rank, run, len } of runs) {
+    if (done.has(name) || done.size >= 28) continue;
+    const size = fs(rank === 1 ? 12 : 11), need = textWidth(name, FELL_I, size) * 1.06;
+    if (len < need * 1.2) continue;
+    const step = size * 0.5, pts = smooth(resample(run, step), 2), n = Math.ceil(need / step);
+    const pad = size * 0.55;
+    const inside = ([x, y]) => x > F.x + size && x < F.x + F.w - size && y > F.y + size && y < F.y + F.h - size;
+    const hit = ([x, y]) => { const b = [x - pad, y - pad, x + pad, y + pad]; return obstacles.some((o) => boxHit(b, o)) || placed.some((o) => boxHit(b, o)); };
+    let best = null;
+    for (let i = 0; i + n < pts.length; i += 2) {
+      const win = pts.slice(i, i + n + 1), a = win[0], b = win[n];
+      const straight = Math.hypot(b[0] - a[0], b[1] - a[1]) / (n * step);
+      if (straight < 0.95 || !win.every(inside) || win.some(hit)) continue;
+      const score = straight - 0.5 * Math.abs((i + n / 2) / pts.length - 0.5);
+      if (!best || score > best.score) best = { score, win };
+    }
+    if (!best) continue;
+    let win = best.win;
+    const [a, b] = [win[0], win[win.length - 1]];
+    // read left to right; a street running up the sheet reads from the bottom
+    if (Math.abs(b[0] - a[0]) > Math.abs(b[1] - a[1]) * 0.25 ? a[0] > b[0] : a[1] < b[1]) win = win.slice().reverse();
+    for (let i = 0; i < win.length; i += 2) placed.push([win[i][0] - pad, win[i][1] - pad, win[i][0] + pad, win[i][1] + pad]);
+    defs += `<path id="street-${id}" d="M${win.map(([x, y]) => `${f1(x)},${f1(y)}`).join('L')}"/>`;
+    text += `<text class="street" dy="${f1(size * 0.34)}" style="font-size:${size}px"><textPath href="#street-${id}" startOffset="50%">${esc(name)}</textPath></text>`;
+    done.add(name);
+    id++;
+  }
+  return defs ? `<defs>${defs}</defs>${text}` : '';
+}
+// References: the numbered landmarks, in two columns down the cartouche
+function references(list, x0, w, y, fs) {
+  const rows = Math.ceil(list.length / 2), colW = w / 2, numW = fs(26);
+  const room = colW - numW - fs(14);
+  let size = fs(12.5);
+  const widest = Math.max(...list.map((t) => textWidth(t, FELL_I, size)));
+  if (widest > room) size = f1(Math.max(fs(10), (size * room) / widest));
+  const fit = (t) => {
+    if (textWidth(t, FELL_I, size) <= room) return t;
+    while (t.length > 4 && textWidth(`${t}…`, FELL_I, size) > room) t = t.slice(0, -1);
+    return `${t.trimEnd()}…`;
+  };
+  let g = `<text class="eyebrow" x="${f1(x0 + w / 2)}" y="${f1(y)}" style="font-size:${fs(15)}px;letter-spacing:${fs(5)}px">References</text>`;
+  list.forEach((t, i) => {
+    const col = Math.floor(i / rows), row = i % rows, x = x0 + col * colW, yy = y + fs(28) + row * fs(19);
+    g += `<text class="legend" x="${f1(x + numW)}" y="${f1(yy)}" text-anchor="end" style="font-size:${size}px;font-style:normal">${i + 1}</text>`;
+    g += `<text class="legend" x="${f1(x + numW + fs(8))}" y="${f1(yy)}" style="font-size:${size}px">${esc(fit(t))}</text>`;
+  });
+  return g;
+}
+// Ward tints, as the old plans washed each quarter in its own colour: a cell round each named
+// quarter (nearer it than any other, no farther than its neighbours are apart), a pale wash with
+// a deeper band just inside the edge, and no two neighbours alike. The lines are drawn from the
+// names, not surveyed boundaries.
+function wardTints(sites, colours, k) {
+  if (sites.length < 3) return '';
+  const nn = sites.map((a) => Math.min(...sites.filter((b) => b !== a).map((b) => Math.hypot(a.x - b.x, a.y - b.y))));
+  const reach = nn.slice().sort((a, b) => a - b)[nn.length >> 1] * 1.5;
+  const cells = sites.map((a, i) => {
+    let poly = [];
+    for (let j = 0; j < 36; j++) { const t = (j / 36) * 2 * Math.PI; poly.push([a.x + reach * Math.cos(t), a.y + reach * Math.sin(t)]); }
+    const nb = new Set();
+    sites.forEach((b, j) => {
+      if (j === i || Math.hypot(a.x - b.x, a.y - b.y) > 2 * reach) return;
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, nx = b.x - a.x, ny = b.y - a.y;
+      const out = [];
+      let cut = false;
+      for (let q = 0; q < poly.length; q++) {
+        const p = poly[q], r = poly[(q + 1) % poly.length];
+        const fp = (p[0] - mx) * nx + (p[1] - my) * ny, fr = (r[0] - mx) * nx + (r[1] - my) * ny;
+        if (fp <= 0) out.push(p); else cut = true;
+        if ((fp <= 0) !== (fr <= 0)) { const t = fp / (fp - fr); out.push([p[0] + (r[0] - p[0]) * t, p[1] + (r[1] - p[1]) * t]); }
+      }
+      poly = out;
+      if (cut) nb.add(j);
+    });
+    return { poly, nb };
+  });
+  cells.forEach((c, i) => c.nb.forEach((j) => cells[j].nb.add(i)));
+  // most-crowded first, each the least-used colour its neighbours haven't taken
+  const colour = [], uses = colours.map(() => 0);
+  for (const i of cells.map((c, i) => i).sort((a, b) => cells[b].nb.size - cells[a].nb.size)) {
+    const taken = new Set([...cells[i].nb].map((j) => colour[j]));
+    let pick = -1;
+    colours.forEach((_, c) => { if (!taken.has(c) && (pick < 0 || uses[c] < uses[pick])) pick = c; });
+    if (pick < 0) pick = uses.indexOf(Math.min(...uses));
+    colour[i] = pick; uses[pick]++;
+  }
+  let g = '';
+  cells.forEach(({ poly }, i) => {
+    if (poly.length < 3) return;
+    const d = `M${poly.map(([x, y]) => `${f1(x)},${f1(y)}`).join('L')}Z`, c = colours[colour[i]];
+    g += `<clipPath id="ward-${i}"><path d="${d}"/></clipPath><path d="${d}" fill="${c}" fill-opacity="0.26"/>`;
+    g += `<path d="${d}" fill="none" stroke="${c}" stroke-opacity="0.8" stroke-width="${f1(12 * k)}" stroke-linejoin="round" clip-path="url(#ward-${i})"/>`;
+  });
+  return g;
+}
 // The Explanation: a sample of each symbol on the sheet, with its name
 function explanation(rows, cx, y, fs, k, wards) {
   const sw = fs(64), gap = fs(16), size = fs(16);
@@ -608,6 +817,8 @@ function explanation(rows, cx, y, fs, k, wards) {
       : kind === 'major' ? line(2.6, C.ink) + line(1.2, C.paper)
       : kind === 'rail' ? line(1.7, C.ink) + line(0.8, C.paper, `stroke-dasharray="${f1(6 * k)} ${f1(6 * k)}"`)
       : kind === 'park' ? `<rect x="${f1(x0)}" y="${f1(m - fs(6))}" width="${f1(sw)}" height="${f1(fs(12))}" fill="${C.park}"/>`
+      : kind === 'grounds' ? `<rect x="${f1(x0)}" y="${f1(m - fs(6))}" width="${f1(sw)}" height="${f1(fs(12))}" fill="${C.grounds}" stroke="${C.mark}" stroke-opacity="0.55" stroke-width="${f1(0.5 * k)}"/>`
+      : kind === 'church' || kind === 'hall' ? glyph(kind, (x0 + x1) / 2, m + fs(4), fs(7), k)
       : boundPaths(`M${f1(x0)},${f1(m)}H${f1(x1)}`, 8, 1, wards, k);
     g += `<text class="legend" x="${f1(x1 + gap)}" y="${f1(yy)}" style="font-size:${size}px">${t}</text>`;
   });
@@ -617,4 +828,16 @@ function explanation(rows, cx, y, fs, k, wards) {
 function boundPaths(d, rw, lw, wards, k) {
   return `<path d="${d}" fill="none" stroke="${C.bound}" stroke-opacity="${wards ? 0.4 : 0.32}" stroke-width="${f1(rw * k)}" stroke-linejoin="round"/>
     <path d="${d}" fill="none" stroke="${C.bound}" stroke-width="${f1(lw * (wards ? 1.9 : 1) * k)}" stroke-linejoin="round"${wards ? '' : ` stroke-dasharray="${f1(10 * k)} ${f1(3 * k)} ${f1(2 * k)} ${f1(3 * k)}"`}/>`;
+}
+// A landmark's mark, sitting on (x, y): a little house in madder, as the old plans drew each
+// building; a church carries a cross, a monument is an obelisk, a park a tree
+function glyph(kind, x, y, s, k) {
+  const st = `stroke="${C.ink}" stroke-width="${f1(0.6 * k)}" stroke-linejoin="round"`;
+  if (kind === 'park') return `<path d="M${f1(x)},${f1(y)}V${f1(y - s * 0.7)}" stroke="${C.ink}" stroke-width="${f1(0.8 * k)}"/><circle cx="${f1(x)}" cy="${f1(y - s * 1.05)}" r="${f1(s * 0.5)}" fill="${C.tree}" ${st}/>`;
+  if (kind === 'monument') return `<path d="M${f1(x - s * 0.22)},${f1(y)}L${f1(x - s * 0.12)},${f1(y - s * 1.3)}L${f1(x)},${f1(y - s * 1.55)}L${f1(x + s * 0.12)},${f1(y - s * 1.3)}L${f1(x + s * 0.22)},${f1(y)}Z" fill="${C.mark}" ${st}/>`;
+  const w = s * 0.62, h = s * 0.55, r = s * 0.5;
+  let g = `<path d="M${f1(x - w)},${f1(y)}V${f1(y - h)}L${f1(x)},${f1(y - h - r)}L${f1(x + w)},${f1(y - h)}V${f1(y)}Z" fill="${C.mark}" ${st}/>`;
+  if (kind === 'church') g += `<path d="M${f1(x)},${f1(y - h - r)}V${f1(y - h - r - s * 0.6)}M${f1(x - s * 0.2)},${f1(y - h - r - s * 0.42)}H${f1(x + s * 0.2)}" stroke="${C.ink}" stroke-width="${f1(0.7 * k)}"/>`;
+  else if (kind === 'station') g += `<path d="M${f1(x - w * 1.5)},${f1(y)}H${f1(x + w * 1.5)}" stroke="${C.ink}" stroke-width="${f1(0.9 * k)}"/>`;
+  return g;
 }
