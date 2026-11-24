@@ -71,6 +71,9 @@ body.busy .toolbar .summary { display: none; }
 .panel h3 { margin: 14px 0 8px; font: 500 12px Inter, system-ui, sans-serif; color: var(--muted); }
 [hidden] { display: none !important; }
 
+.style-group + .style-group { margin-top: 18px; }
+.style-group h3 { margin: 0 0 2px; color: var(--ink); }
+.group-note { margin: 0 0 8px; font-size: 11.5px; line-height: 1.35; color: var(--muted); }
 .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .card {
   display: flex; flex-direction: column; gap: 3px; padding: 6px 6px 9px; text-align: left; cursor: pointer;
@@ -100,6 +103,7 @@ body.busy .toolbar .summary { display: none; }
   font: 500 12px Inter, system-ui, sans-serif; color: var(--muted); line-height: 18px;
 }
 .chip:hover { border-color: #d6ccbd; color: var(--ink); }
+.chip:disabled { opacity: 0.4; cursor: default; }
 .chip.on { background: var(--ink); border-color: var(--ink); color: #fff; }
 
 .status { color: var(--muted); }
@@ -110,6 +114,23 @@ body.busy .toolbar .summary { display: none; }
   display: grid; place-items: center;
 }
 .sheet svg { transition: opacity .3s, filter .3s; }
+/* the preview is a picture to move about, not text to select: a drag or double-click would highlight names */
+.sheet { overflow: hidden; touch-action: pan-y; -webkit-user-select: none; user-select: none; }
+.sheet.zoomed { cursor: grab; touch-action: none; }
+.sheet.zoomed.dragging { cursor: grabbing; }
+/* zoom controls: a small pill on the preview's corner */
+.zoom {
+  position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; padding: 3px;
+  border-radius: 999px; background: rgba(255,255,255,.94); box-shadow: 0 1px 2px rgba(0,0,0,.1), 0 6px 18px rgba(40,25,10,.18);
+  font: 500 13px Inter, system-ui, sans-serif; transition: opacity .2s;
+}
+.zoom button { border: 0; background: none; color: var(--ink); height: 30px; min-width: 30px; padding: 0 8px; border-radius: 999px; cursor: pointer; font: inherit; }
+.zoom button:first-child, .zoom button:last-child { font-size: 18px; line-height: 1; }
+.zoom button:hover:not(:disabled) { background: rgba(0,0,0,.06); }
+.zoom button:disabled { opacity: .35; cursor: default; }
+.zoom button:focus-visible { outline: 2px solid var(--saffron); outline-offset: 1px; }
+#zoom-level { min-width: 52px; font-variant-numeric: tabular-nums; }
+body.busy .zoom { opacity: 0; pointer-events: none; }
 
 /* loading: a card over the preview, the old sheet dimmed behind it */
 .stage { position: relative; }
@@ -153,11 +174,11 @@ body.busy .sheet svg { opacity: .3; filter: blur(2px) saturate(.6); }
 @media (prefers-reduced-motion: reduce) { .card, .sheet { transition: none; } .card .thumb.loading::after, .loader-rose { animation: none; } }
 
 @media print {
-  .toolbar, .panel, .hint, .caption, .loader { display: none; }
+  .toolbar, .panel, .hint, .caption, .loader, .zoom { display: none; }
   html, body { background: none; }
   .studio { display: block; }
   .sheet-wrap { padding: 0; display: block; }
-  .sheet { width: auto !important; box-shadow: none; aspect-ratio: auto !important; display: block; }
+  .sheet { width: auto !important; box-shadow: none; aspect-ratio: auto !important; display: block; overflow: visible; }
   .sheet svg { width: auto; height: auto; }   /* fall back to the SVG's own inch dimensions */
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

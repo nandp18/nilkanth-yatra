@@ -50,10 +50,18 @@
           <h3>Nearby towns</h3>
           <div class="chips" id="towns" role="radiogroup" aria-label="Nearby towns"></div>
         </div>
+        <div class="sub">
+          <h3>Title box</h3>
+          <div class="chips" id="boxes" role="radiogroup" aria-label="Title box position"></div>
+        </div>
+        <div class="sub" id="extras-row" hidden>
+          <h3>City plan details</h3>
+          <div class="chips" id="extras" role="group" aria-label="City plan details"></div>
+        </div>
       </section>
       <section>
         <h2>Style</h2>
-        <div class="cards" id="styles" role="radiogroup" aria-label="Map style"></div>
+        <div id="styles" role="radiogroup" aria-label="Map style"></div>
       </section>
       <section id="layout-section">
         <h2>Layout</h2>
@@ -80,6 +88,11 @@
     <main class="sheet-wrap" id="sheet-wrap">
       <div class="stage">
         <div class="sheet" id="sheet"></div>
+        <div class="zoom" role="group" aria-label="Zoom the preview" title="Pinch or Ctrl/⌘-scroll to zoom; drag or scroll to move about">
+          <button id="zoom-out" aria-label="Zoom out" disabled>−</button>
+          <button id="zoom-level" aria-label="Show the whole sheet">100%</button>
+          <button id="zoom-in" aria-label="Zoom in">+</button>
+        </div>
         <div class="loader" id="loader" role="status" aria-live="polite">
           <div class="loader-card">
             <svg class="loader-rose" viewBox="-24 -24 48 48" aria-hidden="true">
