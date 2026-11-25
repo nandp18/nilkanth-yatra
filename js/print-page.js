@@ -169,6 +169,7 @@ const chip = (group, k, label, extra = '') => `<button class="chip" role="radio"
 const STYLE_GROUPS = [
   ['Shaded relief', 'Hills drawn from the elevation data', ['antique', 'natural', 'watercolor', 'cyanotype', 'night']],
   ['Painted', 'Flat painted grounds with drawn peaks and trees', ['pahari', 'pichwai', 'kalamkari', 'poster']],
+  ['Illustrated', 'Pen-and-ink peaks and forests, ships and sea serpents', ['chart']],
   ['City plans', 'Best on an Any place sheet of a city, 10 or 25 km across', ['gazetteer', 'cityplan', 'wardmap']],
 ];
 {
