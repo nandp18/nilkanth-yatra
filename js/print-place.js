@@ -574,7 +574,7 @@ export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo, 
     ${dots}
     ${marker}
     ${names}
-    ${compassRose(rcx, rcy, roseR, ts)}
+    ${compassRose(rcx, rcy, roseR, ts, FX.rose)}
     ${cartouche}
     ${scale}
   </g>

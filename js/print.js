@@ -4,6 +4,7 @@
 import { STOPS, REGIONS, REGION_SHORT } from './data/stops.js';
 import { LAND, RIVERS } from './data/printdata.js';
 import { buildChronology } from './chronology.js';
+import { inkMotifs, rhumbLines, seaBeasts, fleur, agedSheet, landTest, boxOnLand } from './print-chart.js';
 
 const DEM_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 const EXTENT = { lon0: 66.5, lon1: 97.5, lat0: 5.5, lat1: 35.5 };      // Classic layout
@@ -170,6 +171,21 @@ export const STYLES = {
     },
     fx: { mottle: [0.3, 0.25, 0.15, 0.25, -0.12], grain: [0.3, 0.25, 0.2, 0.4, -0.12], grainOpacity: 0.22,
       vignette: null, waterLines: 0, grat: 0, motifs: 'poster', waves: true, frame: 'poster' },
+  },
+  // An explorer's chart: pen-drawn peaks and forests on worn parchment, a grey-green sea
+  // crossed by rhumb lines and sailed by ships and serpents, on a torn, stained, folded sheet
+  chart: {
+    label: 'Old chart', note: 'Pen-drawn peaks, forests, ships and sea serpents on worn parchment, after explorers’ charts',
+    C: { ink: '#2a1d12', ink2: '#3e2c1c', ink3: '#4e3824', ink4: '#5e4a34', red: '#8e1f14', water: '#3d5a60',
+      paper: '#e6d3a3', sea: '#a8b6a6', seaLine: '#a8b6a6', key: '#ebdab0', seaInk: '#2c454c',
+      peak: '#eee0bb', snow: '#faf4e4', forest: '#a19a5c', forest2: '#858048', beast: '#5c7268', beastHi: '#9db0a2',
+      hull: '#6b4a2a', sail: '#f1e6c8', burn: '#4a2a0e', beyond: '#2b1e15' },
+    ramp: [[0, [226, 208, 160]], [400, [224, 204, 154]], [1200, [216, 194, 146]], [3000, [210, 192, 156]],
+      [5000, [226, 216, 196]], [6600, [240, 234, 222]]],
+    tone: (c, hs) => { const s = Math.min(1.07, 0.74 + 0.4 * hs); return [c[0] * s, c[1] * s, c[2] * s * 0.97]; },
+    fx: { mottle: [0.42, 0.28, 0.12, 0.72, -0.18], grain: [0.3, 0.2, 0.1, 0.6, -0.14], grainOpacity: 0.45,
+      vignette: ['#4a2c0e', 0.5], waterLines: 1.1, grat: 0, motifs: 'ink', motifScale: 0.72, motifScaleWorld: 1.35,
+      rhumbs: true, beasts: true, aged: true, rose: 'fleur', openTitle: true },
   },
   // The 1890s city plans of the American atlas houses. Land is a flat tint, with no hill
   // shading, only a touch of shadow on steep ground. On an Any place sheet they add parks and
@@ -405,7 +421,30 @@ async function engrave(data, style, onProgress, opts = {}) {
     ctx.putImageData(img, 0, sy);
     onProgress?.(0.9 * ((sy + hgt) / H));
   }
-  return finish(canvas, data, onProgress);
+  // Shaded styles that carry drawn motifs (the Old chart) sample them here too
+  const extra = style.fx.motifs ? { motifs: motifs(data, await smoother(data), motifOpts(style, opts)) } : {};
+  return finish(canvas, data, onProgress, extra);
+}
+// A style can ask for its motifs packed closer than the painted ones on the whole-route
+// sheets, and wider on an Any place sheet, whose finer grid would bury the ground in glyphs
+const motifOpts = (style, opts) => ({ ...opts, motifStep: (opts.motifStep ?? 0.42) * (opts.world ? style.fx.motifScaleWorld ?? 1 : style.fx.motifScale ?? 1) });
+
+// Smoothed elevation: block means, sampled bilinearly, so band edges flow like brushwork
+async function smoother({ elev, W, H }) {
+  const B = 6, gw = Math.ceil(W / B), gh = Math.ceil(H / B), grid = new Float32Array(gw * gh);
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      let sum = 0, cnt = 0;
+      for (let y = gy * B; y < Math.min(H, gy * B + B); y++) for (let x = gx * B; x < Math.min(W, gx * B + B); x++) { sum += Math.max(0, elev[y * W + x]); cnt++; }
+      grid[gy * gw + gx] = sum / cnt;
+    }
+    if (due()) await pause();
+  }
+  return (i, j) => {
+    const fx = Math.max(0, Math.min(gw - 1.001, i / B - 0.5)), fy = Math.max(0, Math.min(gh - 1.001, j / B - 0.5));
+    const ix = fx | 0, iy = fy | 0, tx = fx - ix, ty = fy - iy, o = iy * gw + ix;
+    return (grid[o] * (1 - tx) + grid[o + 1] * tx) * (1 - ty) + (grid[o + gw] * (1 - tx) + grid[o + gw + 1] * tx) * ty;
+  };
 }
 
 // Encode the relief canvas and report its geographic bounds
@@ -425,21 +464,7 @@ async function finish(canvas, { n, x0, y0, x1, y1 }, onProgress, extra = {}) {
 async function paint(data, style, onProgress, opts = {}) {
   const { elev, W, H, n, x0, y0 } = data;
   const { bands, outline, edge: edgeRGB } = style.paint;
-  // Smoothed elevation: block means, sampled bilinearly, so band edges flow like brushwork
-  const B = 6, gw = Math.ceil(W / B), gh = Math.ceil(H / B), grid = new Float32Array(gw * gh);
-  for (let gy = 0; gy < gh; gy++) {
-    for (let gx = 0; gx < gw; gx++) {
-      let sum = 0, cnt = 0;
-      for (let y = gy * B; y < Math.min(H, gy * B + B); y++) for (let x = gx * B; x < Math.min(W, gx * B + B); x++) { sum += Math.max(0, elev[y * W + x]); cnt++; }
-      grid[gy * gw + gx] = sum / cnt;
-    }
-    if (due()) await pause();
-  }
-  const smooth = (i, j) => {
-    const fx = Math.max(0, Math.min(gw - 1.001, i / B - 0.5)), fy = Math.max(0, Math.min(gh - 1.001, j / B - 0.5));
-    const ix = fx | 0, iy = fy | 0, tx = fx - ix, ty = fy - iy, o = iy * gw + ix;
-    return (grid[o] * (1 - tx) + grid[o + 1] * tx) * (1 - ty) + (grid[o + gw] * (1 - tx) + grid[o + gw + 1] * tx) * ty;
-  };
+  const smooth = await smoother(data);
   const bandOf = (e) => { let b = 0; while (b < bands.length - 1 && e >= bands[b + 1][0]) b++; return b; };
 
   const az = 315 * RAD, alt = 40 * RAD, zf = opts.zf ?? 3.1;
@@ -477,7 +502,7 @@ async function paint(data, style, onProgress, opts = {}) {
     ctx.putImageData(img, 0, sy);
     onProgress?.(0.9 * ((sy + hgt) / H));
   }
-  return finish(canvas, data, onProgress, { motifs: motifs(data, smooth, opts) });
+  return finish(canvas, data, onProgress, { motifs: motifs(data, smooth, motifOpts(style, opts)) });
 }
 
 // Sample the land on a staggered 0.42° grid: rugged high ground → painted peaks,
@@ -691,6 +716,7 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
   const ey1 = mercY(EXT.lat1), ey0 = mercY(EXT.lat0);
   const px = (lon) => F.x + ((lon - EXT.lon0) / (EXT.lon1 - EXT.lon0)) * F.w;
   const py = (lat) => F.y + ((ey1 - mercY(lat)) / (ey1 - ey0)) * F.h;
+  const unproj = (x, y) => [EXT.lon0 + ((x - F.x) / F.w) * (EXT.lon1 - EXT.lon0), latOfMerc(ey1 - ((y - F.y) / F.h) * (ey1 - ey0))];
   const unitsPerKm = (lat) => F.w / (EXT.lon1 - EXT.lon0) / (111.32 * Math.cos(lat * RAD));
   const pathOf = (flat, close) => {
     let d = '';
@@ -727,7 +753,8 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
   const SK = DETAIL ? [500, 250, 200, 100, 50].find((v) => v * unitsPerKm(latMid) <= fs(330)) || 50 : 500;
   const k500 = SK * unitsPerKm(latMid);
   // Map layout: title cartouche in the open sea at lower left, compass rose above it
-  const cart = { w: Math.max(fs(560), textWidth('Van Vicharan', `${face.weight} $px ${face.family}`, fs(100 * face.scale)) + fs(90)), h: fs(372) };
+  // (an open title, with no box to fill, is only as wide as its words)
+  const cart = { w: Math.max(fs(FX.openTitle ? 480 : 560), textWidth('Van Vicharan', `${face.weight} $px ${face.family}`, fs(100 * face.scale)) + fs(FX.openTitle ? 24 : 90)), h: fs(372) };
   cart.x = F.x + fs(40); cart.y = F.y + F.h - fs(40) - cart.h;
   const roseR = 92 * ts;
   // Map layout: rose out in the open Indian Ocean, clear of the crowded southern tip
@@ -744,13 +771,42 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
     const rs = rc.map(([x, y], i) => (i === best ? Infinity : busy(x - roseR, y - roseR * 1.3, x + roseR, y + roseR)));
     [rcx, rcy] = rc[rs.indexOf(Math.min(...rs))];
   }
+  // Old chart (FX.openTitle): the title is set without a box out in the Indian Ocean, a little
+  // right of centre, and the rose takes its place in the lower-left corner (as on the old
+  // explorers' charts). The title goes to the clear spot nearest that aim: in open water, with
+  // room for the sea's name above it, clear of the stops, the route and the rose.
+  if (FX.openTitle && MAPL && !DETAIL) {
+    const isLand = landTest(unproj), pad = fs(14);
+    let rose;
+    const routePts = ROUTE.map(([lo, la]) => [px(lo), py(la)]);
+    const fits = (x, y) => {
+      const b = [x - pad, y - pad - fs(60), x + cart.w + pad, y + cart.h + pad];
+      return !boxHit(b, rose) && !discs.some((d) => d.x > b[0] && d.x < b[2] && d.y > b[1] && d.y < b[3]) &&
+        !routePts.some(([qx, qy]) => qx > b[0] && qx < b[2] && qy > b[1] && qy < b[3]) && !boxOnLand(isLand, b, fs(24));
+    };
+    const aim = F.x + F.w * 0.56, xMin = F.x + fs(40), xMax = F.x + F.w - fs(40) - cart.w, yLow = F.y + F.h - fs(40) - cart.h;
+    const tries = [];
+    for (let i = 0; i <= 24; i++) for (let j = 0; j <= 6; j++) {
+      const x = xMin + (i / 24) * (xMax - xMin), y = yLow - (j / 6) * F.h * 0.08;
+      tries.push([x, y, Math.abs(x + cart.w / 2 - aim) / F.w + (0.5 * (yLow - y)) / F.h]);
+    }
+    tries.sort((a, b) => a[2] - b[2]);
+    // first with the rose in the corner; on sheets with too little ocean for that, the rose
+    // stays out east and the title comes in from the corner as far toward the middle as fits
+    const usual = [rcx, rcy];
+    for (const [x, y] of [[F.x + roseR * 1.7, F.y + F.h - roseR * 1.7], usual]) {
+      rcx = x; rcy = y; rose = [rcx - roseR * 1.1, rcy - roseR * 1.55, rcx + roseR * 1.1, rcy + roseR * 1.1];
+      const best = tries.find(([tx, ty]) => fits(tx, ty));
+      if (best) { [cart.x, cart.y] = best; break; }
+    }
+  }
   const sx = MAPL ? cart.x + (cart.w - k500) / 2 : px(67.6), sy = MAPL ? cart.y + cart.h - fs(86) : py(9.1);
   if (MAPL) obstacles.push([cart.x - 8, cart.y - 8, cart.x + cart.w + 8, cart.y + cart.h + 8]);
   else {
     obstacles.push([kx - 6, ky - 6, kx + kw + 6, ky + kh + 6]);
     obstacles.push([sx - 10, sy - fs(26), sx + k500 + 10, sy + fs(36)]);
   }
-  obstacles.push([rcx - roseR, rcy - roseR * 1.3, rcx + roseR, rcy + roseR]);
+  obstacles.push([rcx - roseR * 1.05, rcy - roseR * (FX.rose ? 1.5 : 1.3), rcx + roseR * 1.05, rcy + roseR * 1.05]);
 
   // area labels: [text, lon, lat, class, size, font, tracking, rotate]
   const AREA = [
@@ -766,7 +822,17 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
    .filter(([, lon, lat]) => lon > EXT.lon0 && lon < EXT.lon1 && lat > EXT.lat0 && lat < EXT.lat1);
   let areas = '';
   for (const [text, lon, lat, cls, size, font, track, rot] of AREA) {
-    const s = fs(size), tr = track * ts, wdt = textWidth(text, font, s, tr), x = px(lon), y = py(lat);
+    const s = fs(size), tr = track * ts, wdt = textWidth(text, font, s, tr);
+    let x = px(lon);
+    // Map layout: slide a sea name out from under the title cartouche
+    let y = py(lat);
+    if (MAPL && boxHit([x - wdt / 2, y - s * 0.8, x + wdt / 2, y + s * 0.25], [cart.x, cart.y, cart.x + cart.w, cart.y + cart.h])) {
+      x = cart.x + cart.w + wdt / 2 + fs(24);
+      // an open title has the room above it kept clear: use that if the side is taken
+      if (FX.openTitle && (x + wdt / 2 > F.x + F.w - fs(20) || obstacles.some((o) => boxHit([x - wdt / 2, y - s * 0.8, x + wdt / 2, y + s * 0.25], o)))) {
+        x = cart.x + cart.w / 2; y = cart.y - fs(18);
+      }
+    }
     obstacles.push([x - wdt / 2, y - s * 0.8, x + wdt / 2, y + s * 0.25]);
     areas += `<text class="${cls}" x="${f1(x)}" y="${f1(y)}" style="font-size:${s}px;letter-spacing:${f1(tr)}px"${rot ? ` transform="rotate(${rot} ${f1(x)} ${f1(y)})"` : ''}>${esc(text)}</text>`;
   }
@@ -903,17 +969,29 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
   if (MAPL) {
     const cx = cart.x + cart.w / 2;
     const yT = cart.y + fs(54), yTitle = yT + fs(92 * Math.min(1.08, face.scale)), ySub = yTitle + fs(44), yFacts = ySub + fs(40);
-    cartouche = `<rect x="${f1(cart.x)}" y="${f1(cart.y)}" width="${f1(cart.w)}" height="${f1(cart.h)}" fill="${C.key}" fill-opacity="0.96" stroke="${C.ink}" stroke-width="${f1(1.6 * ts)}"/>
-      <rect x="${f1(cart.x + 7 * ts)}" y="${f1(cart.y + 7 * ts)}" width="${f1(cart.w - 14 * ts)}" height="${f1(cart.h - 14 * ts)}" fill="none" stroke="${C.ink}" stroke-width="${f1(0.6 * ts)}"/>
+    // Boxed cartouche, or (Old chart) the same lines set straight on the sea: a soft clearing
+    // that fades out under the rhumb lines, a sea-coloured halo on the type, and double rules
+    const rules = (y, half) => `<path d="M${f1(cx - half)},${f1(y)}H${f1(cx + half)}M${f1(cx - half)},${f1(y + 4 * ts)}H${f1(cx + half)}" stroke="${C.ink}" stroke-width="${f1(0.8 * ts)}"/>`;
+    const frame = FX.openTitle
+      ? `<defs><radialGradient id="titleClear"><stop offset="55%" stop-color="${C.sea}" stop-opacity="0.92"/><stop offset="100%" stop-color="${C.sea}" stop-opacity="0"/></radialGradient></defs>
+      <ellipse cx="${f1(cx)}" cy="${f1(cart.y + cart.h / 2)}" rx="${f1(cart.w * 0.66)}" ry="${f1(cart.h * 0.66)}" fill="url(#titleClear)"/>
+      ${rules(cart.y + fs(22), cart.w * 0.46)}${rules(yFacts + fs(16), cart.w * 0.4)}`
+      : `<rect x="${f1(cart.x)}" y="${f1(cart.y)}" width="${f1(cart.w)}" height="${f1(cart.h)}" fill="${C.key}" fill-opacity="0.96" stroke="${C.ink}" stroke-width="${f1(1.6 * ts)}"/>
+      <rect x="${f1(cart.x + 7 * ts)}" y="${f1(cart.y + 7 * ts)}" width="${f1(cart.w - 14 * ts)}" height="${f1(cart.h - 14 * ts)}" fill="none" stroke="${C.ink}" stroke-width="${f1(0.6 * ts)}"/>`;
+    cartouche = `${frame}
       <text class="eyebrow" x="${f1(cx)}" y="${f1(yT)}" style="font-size:${fs(19)}px;letter-spacing:${fs(8)}px">A chart of Shri Nilkanth Varni’s</text>
       <text class="title" x="${f1(cx)}" y="${f1(yTitle)}" style="font-size:${fs(100 * face.scale)}px;letter-spacing:${f1(face.track * ts)}px">Van Vicharan</text>
       <text class="subtitle" x="${f1(cx)}" y="${f1(ySub)}" style="font-size:${fs(25)}px">${DETAIL ? esc(DETAILS[EXT.region].title) : 'The journey of Nilkanth Varni'}</text>
       ${ornamentRule(cx, ySub + fs(18), fs(150), ts)}
       <text class="facts" x="${f1(cx)}" y="${f1(yFacts)}" style="font-size:${fs(17)}px;letter-spacing:${fs(4)}px">${DETAIL ? detailFacts(EXT.region) : 'Ayodhya to Loj · 1792 – 1799'}</text>
       <text class="credit" x="${f1(cx)}" y="${f1(cart.y + cart.h - fs(22))}" text-anchor="middle" style="font-size:${fs(11)}px">Relief: Mapzen Terrain Tiles · Coastlines: Natural Earth · Tirth positions approximate</text>`;
+    if (FX.openTitle) cartouche = `<g class="open-title">${cartouche}</g>`;
   }
   const rel = rel_(reliefData, px, py);
   const motifSvg = FX.motifs ? paintMotifs(reliefData.motifs || [], px, py, ts, discs, R, [...obstacles, ...placed], FX.motifs) : '';
+  // Old chart: rhumb lines from the rose and a second node across the sea; ships and serpents
+  const rhumbs = FX.rhumbs ? rhumbLines([[rcx, rcy], [2 * F.x + F.w - rcx, rcy]], F, ts) : '';
+  const beasts = FX.beasts ? seaBeasts(F, unproj, [...obstacles, ...placed], discs, ROUTE.map(([lo, la]) => [px(lo), py(la)]), ts) : '';
   const titleSize = fs(150 * face.scale);
 
   return `${sheetOpen(fmt, W, H, k, ts, fs, face, FX, `<clipPath id="frame"><rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}"/></clipPath>
@@ -928,7 +1006,9 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
   <g clip-path="url(#frame)">
     <rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}" fill="${C.sea}"/>
     ${FX.waves ? `<rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}" fill="url(#waves)"/>` : ''}
+    ${rhumbs}
     ${waterLines}
+    ${beasts}
     <g clip-path="url(#land)">
       <image href="${rel.href}" x="${f1(rel.x)}" y="${f1(rel.y)}" width="${f1(rel.w)}" height="${f1(rel.h)}" preserveAspectRatio="none"/>
       ${FX.wash ? `<rect x="${f1(F.x)}" y="${f1(F.y)}" width="${f1(F.w)}" height="${f1(F.h)}" filter="url(#pigment)" opacity="0.55"/>
@@ -945,7 +1025,7 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
     ${marks}
     ${names}
     ${annots}
-    ${compassRose(rcx, rcy, roseR, ts)}
+    ${compassRose(rcx, rcy, roseR, ts, FX.rose)}
     ${cartouche}
     ${scale}
     ${MAPL ? '' : key}
@@ -1024,6 +1104,7 @@ export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts =
       .rose-n { text-anchor: middle; }
       .legend { font-style: italic; }
       .credit { fill: ${C.ink4}; }
+      .open-title text { paint-order: stroke; stroke: ${C.sea}; stroke-width: ${fs(3)}px; stroke-linejoin: round; }
       .colophon { font-style: italic; text-anchor: middle; fill: ${C.ink2}; }
       .chron-h { text-anchor: middle; }
       .chron-r { text-anchor: middle; fill: ${C.ink3}; }
@@ -1040,6 +1121,7 @@ export function sheetOpen(fmt, W, H, k, ts, fs, face, FX, extraDefs = '', opts =
 }
 export function sheetClose(W, H, FX) {
   return `${FX.vignette ? `<rect width="${W}" height="${H}" fill="url(#vignette)" pointer-events="none"/>` : ''}
+  ${FX.aged ? agedSheet(W, H) : ''}
   <rect width="${W}" height="${H}" filter="url(#grain)" opacity="${FX.grainOpacity}" pointer-events="none"/>
 </svg>`;
 }
@@ -1232,6 +1314,7 @@ function paintMotifs(list, px, py, ts, discs, R, obstacles, kind = true, route =
   const L = (n) => f1(n);
   if (kind === 'pichwai') return pichwaiMotifs(items, ts);
   if (kind === 'kalamkari') return kalamkariMotifs(items, ts);
+  if (kind === 'ink') return inkMotifs(items, ts);
   let g = '';
   for (const m of items) {
     const { x, y } = m, sw = L(0.9 * ts);
@@ -1258,9 +1341,22 @@ function paintMotifs(list, px, py, ts, discs, R, obstacles, kind = true, route =
   return `<g class="motifs">${g}</g>`;
 }
 
-function compassRose(cx, cy, R, ts) {
+function compassRose(cx, cy, R, ts, fancy) {
   const pt = (ang, rr) => `${f1(cx + Math.sin(ang) * rr)},${f1(cy - Math.cos(ang) * rr)}`;
-  let g = `<circle cx="${f1(cx)}" cy="${f1(cy)}" r="${f1(R * 0.92)}" fill="none" stroke="${C.ink}" stroke-width="${f1(1.3 * ts)}"/>`;
+  let g = '';
+  if (fancy) {
+    // Old chart: a chequered outer ring and sixteen points, with a fleur-de-lis for north
+    g += `<circle cx="${f1(cx)}" cy="${f1(cy)}" r="${f1(R * 1.02)}" fill="${C.key}" fill-opacity="0.55" stroke="${C.ink}" stroke-width="${f1(1 * ts)}"/>`;
+    for (let i = 0; i < 32; i += 2) {
+      const a0 = i * 11.25 * RAD, a1 = (i + 1) * 11.25 * RAD;
+      g += `<path d="M${pt(a0, R * 0.92)}A${f1(R * 0.92)},${f1(R * 0.92)} 0 0 1 ${pt(a1, R * 0.92)}L${pt(a1, R * 1.02)}A${f1(R * 1.02)},${f1(R * 1.02)} 0 0 0 ${pt(a0, R * 1.02)}Z" fill="${C.ink}"/>`;
+    }
+    for (let d = 22.5; d < 360; d += 45) {
+      const a = d * RAD;
+      g += `<polygon points="${f1(cx)},${f1(cy)} ${pt(a, R * 0.42)} ${pt(a - Math.PI / 2, R * 0.05)}" fill="${C.ink}"/><polygon points="${f1(cx)},${f1(cy)} ${pt(a, R * 0.42)} ${pt(a + Math.PI / 2, R * 0.05)}" fill="${C.key}" stroke="${C.ink}" stroke-width="${f1(0.6 * ts)}"/>`;
+    }
+  }
+  g += `<circle cx="${f1(cx)}" cy="${f1(cy)}" r="${f1(R * 0.92)}" fill="none" stroke="${C.ink}" stroke-width="${f1(1.3 * ts)}"/>`;
   g += `<circle cx="${f1(cx)}" cy="${f1(cy)}" r="${f1(R * 0.86)}" fill="none" stroke="${C.ink}" stroke-width="${f1(0.6 * ts)}"/>`;
   for (let d = 0; d < 360; d += 10) {
     const a = d * RAD;
@@ -1271,7 +1367,8 @@ function compassRose(cx, cy, R, ts) {
     g += `<polygon points="${c0} ${tip} ${l}" fill="${C.ink}"/><polygon points="${c0} ${tip} ${r}" fill="${C.key}" stroke="${C.ink}" stroke-width="${f1(0.8 * ts)}"/>`;
   }
   g += `<circle cx="${f1(cx)}" cy="${f1(cy)}" r="${f1(R * 0.05)}" fill="${C.red}"/>`;
-  g += `<text class="rose-n" x="${f1(cx)}" y="${f1(cy - R * 1.04)}" style="font-size:${f1(30 * ts)}px">N</text>`;
+  g += fancy ? fleur(cx, cy - R * 1.04, R * 0.42, C.ink)
+    : `<text class="rose-n" x="${f1(cx)}" y="${f1(cy - R * 1.04)}" style="font-size:${f1(30 * ts)}px">N</text>`;
   return g;
 }
 
