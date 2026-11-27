@@ -775,20 +775,24 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
   // Old chart (FX.openTitle): the title is set without a box out in the Indian Ocean, east of
   // Lanka about two-thirds of the way down, and the rose sits in the open sea at lower left,
   // brought in from the corner (as on the old explorers' charts). The sheet bleeds to its edges,
-  // so both keep a safe margin of 0.6 in from the trim. The title goes to the clear spot nearest
-  // its aim: in open water, with room for the sea's name above it, clear of the stops, the route
-  // and the rose.
+  // so both keep a safe margin of 0.6 in from the trim. "Indian Ocean" is set just under Lanka,
+  // and the title goes to the clear spot nearest its aim: in open water, clear of that name, the
+  // stops, the route and the rose.
   const safe = FX.bleed ? fs(60) : fs(40);
+  let oceanAt = null;
   if (FX.openTitle && MAPL && !DETAIL) {
+    const os = fs(40), ow = textWidth('Indian Ocean', FELL_I, os, 10 * ts);
+    oceanAt = { x: px(80.75), y: py(5.92) + fs(26) + os * 0.8 };
+    const oceanBox = [oceanAt.x - ow / 2, oceanAt.y - os * 0.8, oceanAt.x + ow / 2, oceanAt.y + os * 0.25];
     const isLand = landTest(unproj), pad = fs(14);
     let rose;
     const routePts = ROUTE.map(([lo, la]) => [px(lo), py(la)]);
     const fits = (x, y) => {
-      const b = [x - pad, y - pad - fs(60), x + cart.w + pad, y + cart.h + pad];
-      return !boxHit(b, rose) && !discs.some((d) => d.x > b[0] && d.x < b[2] && d.y > b[1] && d.y < b[3]) &&
+      const b = [x - pad, y - pad, x + cart.w + pad, y + cart.h + pad];
+      return !boxHit(b, rose) && !boxHit(b, oceanBox) && !discs.some((d) => d.x > b[0] && d.x < b[2] && d.y > b[1] && d.y < b[3]) &&
         !routePts.some(([qx, qy]) => qx > b[0] && qx < b[2] && qy > b[1] && qy < b[3]) && !boxOnLand(isLand, b, fs(24));
     };
-    const aimX = F.x + F.w * 0.74, aimY = F.y + F.h * 0.73;
+    const aimX = F.x + F.w * 0.74, aimY = F.y + F.h * 0.65;
     const xMin = F.x + safe, xMax = F.x + F.w - safe - cart.w, yMin = F.y + F.h * 0.4, yMax = F.y + F.h - safe - cart.h;
     const tries = [];
     for (let i = 0; i <= 30; i++) for (let j = 0; j <= 30; j++) {
@@ -806,7 +810,9 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
     }
   }
   const sx = MAPL ? cart.x + (cart.w - k500) / 2 : px(67.6), sy = MAPL ? cart.y + cart.h - fs(86) : py(9.1);
-  if (MAPL) obstacles.push([cart.x - 8, cart.y - 8, cart.x + cart.w + 8, cart.y + cart.h + 8]);
+  // an open title keeps ships and labels off the soft clearing round it, not just its words
+  if (MAPL) obstacles.push(FX.openTitle ? [cart.x - cart.w * 0.12, cart.y - cart.h * 0.12, cart.x + cart.w * 1.12, cart.y + cart.h * 1.12]
+    : [cart.x - 8, cart.y - 8, cart.x + cart.w + 8, cart.y + cart.h + 8]);
   else {
     obstacles.push([kx - 6, ky - 6, kx + kw + 6, ky + kh + 6]);
     obstacles.push([sx - 10, sy - fs(26), sx + k500 + 10, sy + fs(36)]);
@@ -831,7 +837,8 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
     let x = px(lon);
     // Map layout: slide a sea name out from under the title cartouche
     let y = py(lat);
-    if (MAPL && boxHit([x - wdt / 2, y - s * 0.8, x + wdt / 2, y + s * 0.25], [cart.x, cart.y, cart.x + cart.w, cart.y + cart.h])) {
+    if (text === 'Indian Ocean' && oceanAt) ({ x, y } = oceanAt);       // Old chart: just under Lanka
+    else if (MAPL && boxHit([x - wdt / 2, y - s * 0.8, x + wdt / 2, y + s * 0.25], [cart.x, cart.y, cart.x + cart.w, cart.y + cart.h])) {
       x = cart.x + cart.w + wdt / 2 + fs(24);
       // an open title has the room above it kept clear: use that if the side is taken
       if (FX.openTitle && (x + wdt / 2 > F.x + F.w - fs(20) || obstacles.some((o) => boxHit([x - wdt / 2, y - s * 0.8, x + wdt / 2, y + s * 0.25], o)))) {
@@ -1001,8 +1008,8 @@ export function buildSheet(fmt, faceKey, reliefData, onlyNames = null, layout = 
   }
   const rel = rel_(reliefData, px, py);
   const motifSvg = FX.motifs ? paintMotifs(reliefData.motifs || [], px, py, ts, discs, R, [...obstacles, ...placed], FX.motifs) : '';
-  // Old chart: rhumb lines from the rose and a second node across the sea; ships and serpents
-  const rhumbs = FX.rhumbs ? rhumbLines([[rcx, rcy], [2 * F.x + F.w - rcx, rcy]], F, ts) : '';
+  // Old chart: rhumb lines out of the rose; ships and serpents
+  const rhumbs = FX.rhumbs ? rhumbLines([[rcx, rcy]], F, ts) : '';
   const beasts = FX.beasts ? seaBeasts({ x: F.x + safe, y: F.y + safe, w: F.w - 2 * safe, h: F.h - 2 * safe }, unproj, [...obstacles, ...placed], discs, ROUTE.map(([lo, la]) => [px(lo), py(la)]), ts) : '';
   const titleSize = fs(150 * face.scale);
 

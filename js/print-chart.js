@@ -77,20 +77,18 @@ export function inkMotifs(items, ts) {
 }
 
 // ---------- Rhumb lines ----------
-// 32 lines out of each node, the cardinal and half-cardinal ones a little darker
+// 32 lines out of each node (the compass rose), all drawn alike
 export function rhumbLines(nodes, F, ts) {
   const { C, f1: L, RAD } = kit;
   const len = Math.hypot(F.w, F.h) * 1.2;
-  let thin = '', bold = '';
+  let d = '';
   for (const [cx, cy] of nodes) {
     for (let i = 0; i < 32; i++) {
-      const a = i * 11.25 * RAD, d = `M${L(cx)},${L(cy)}L${L(cx + Math.sin(a) * len)},${L(cy - Math.cos(a) * len)}`;
-      if (i % 4 === 0) bold += d; else thin += d;
+      const a = i * 11.25 * RAD;
+      d += `M${L(cx)},${L(cy)}L${L(cx + Math.sin(a) * len)},${L(cy - Math.cos(a) * len)}`;
     }
   }
-  return `<path d="${thin}" fill="none" stroke="${C.ink}" stroke-opacity="0.16" stroke-width="${L(0.6 * ts)}"/>
-    <path d="${bold}" fill="none" stroke="${C.ink}" stroke-opacity="0.28" stroke-width="${L(0.9 * ts)}"/>
-    ${nodes.slice(1).map(([x, y]) => `<circle cx="${L(x)}" cy="${L(y)}" r="${L(3 * ts)}" fill="${C.ink}" fill-opacity="0.5"/>`).join('')}`;
+  return `<path d="${d}" fill="none" stroke="${C.ink}" stroke-opacity="0.22" stroke-width="${L(0.75 * ts)}"/>`;
 }
 
 // ---------- Ships and serpents ----------
