@@ -279,7 +279,8 @@ const degLabel = (v, step, pos, neg) => {
 export function buildPlace(fmt, faceKey, styleKey, reliefData, EXT, place, geo, extras = {}, box = 'auto') {
   const X = cityExtras(styleKey, extras);
   const S = useStyle(styleKey), FX = S.fx;
-  const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100), k = W / 1800, ts = k;
+  // type scales with the short side, so a landscape sheet reads at the same size as the portrait one
+  const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100), k = Math.min(W, H) / 1800, ts = k;
   const fs = (u) => f1(u * ts);
   const face = TITLE_FACES[faceKey];
   const F = mapFrame(fmt), bottom = F.y + F.h, dLon = EXT.lon1 - EXT.lon0;

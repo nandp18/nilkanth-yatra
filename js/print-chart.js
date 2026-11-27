@@ -77,20 +77,18 @@ export function inkMotifs(items, ts) {
 }
 
 // ---------- Rhumb lines ----------
-// 32 lines out of each node, the cardinal and half-cardinal ones a little darker
+// 32 lines out of each node (the compass rose), all drawn alike
 export function rhumbLines(nodes, F, ts) {
   const { C, f1: L, RAD } = kit;
   const len = Math.hypot(F.w, F.h) * 1.2;
-  let thin = '', bold = '';
+  let d = '';
   for (const [cx, cy] of nodes) {
     for (let i = 0; i < 32; i++) {
-      const a = i * 11.25 * RAD, d = `M${L(cx)},${L(cy)}L${L(cx + Math.sin(a) * len)},${L(cy - Math.cos(a) * len)}`;
-      if (i % 4 === 0) bold += d; else thin += d;
+      const a = i * 11.25 * RAD;
+      d += `M${L(cx)},${L(cy)}L${L(cx + Math.sin(a) * len)},${L(cy - Math.cos(a) * len)}`;
     }
   }
-  return `<path d="${thin}" fill="none" stroke="${C.ink}" stroke-opacity="0.16" stroke-width="${L(0.6 * ts)}"/>
-    <path d="${bold}" fill="none" stroke="${C.ink}" stroke-opacity="0.28" stroke-width="${L(0.9 * ts)}"/>
-    ${nodes.slice(1).map(([x, y]) => `<circle cx="${L(x)}" cy="${L(y)}" r="${L(3 * ts)}" fill="${C.ink}" fill-opacity="0.5"/>`).join('')}`;
+  return `<path d="${d}" fill="none" stroke="${C.ink}" stroke-opacity="0.22" stroke-width="${L(0.75 * ts)}"/>`;
 }
 
 // ---------- Ships and serpents ----------
@@ -227,10 +225,11 @@ export function fleur(cx, cy, size, fill) {
 }
 
 // ---------- The aged sheet ----------
-// Stains and fold creases over the picture, a darkened, burnt edge, and the torn outline
-// with dark ground beyond it. Drawn last, under the grain.
-export function agedSheet(W, H) {
-  const { C, f1: L } = kit, k = W / 1800, rnd = seeded(29);
+// Stains and fold creases over the picture and, with `edge`, a darkened, burnt edge and the
+// torn outline with dark ground beyond it. Drawn last, under the grain. A sheet that bleeds
+// to the trim goes without the edge, so nothing but the map reaches the paper's ends.
+export function agedSheet(W, H, { edge = true } = {}) {
+  const { C, f1: L } = kit, k = Math.min(W, H) / 1800, rnd = seeded(29);
   // the torn outline: a slow wander, fine jitter, a few tears and two bitten corners
   const ph = Array.from({ length: 6 }, () => rnd() * Math.PI * 2);
   const tears = Array.from({ length: 7 }, () => [rnd(), 0.004 + rnd() * 0.01, (10 + rnd() * 18) * k]);
@@ -269,7 +268,7 @@ export function agedSheet(W, H) {
   </defs>
   <g filter="url(#stainEdge)" pointer-events="none">${stains}</g>
   <g filter="url(#creaseBlur)" pointer-events="none">${crease(`M${L(W / 2)},0V${H}`, 3 * k, 0)}${crease(`M0,${L(H / 2)}H${W}`, 0, 3 * k)}</g>
-  <g clip-path="url(#sheetEdge)" pointer-events="none"><path d="${torn}" fill="none" stroke="${C.burn}" stroke-opacity="0.6" stroke-width="${L(44 * k)}" filter="url(#burnBlur)"/></g>
+  ${edge ? `<g clip-path="url(#sheetEdge)" pointer-events="none"><path d="${torn}" fill="none" stroke="${C.burn}" stroke-opacity="0.6" stroke-width="${L(44 * k)}" filter="url(#burnBlur)"/></g>
   <path d="M0,0H${W}V${H}H0Z ${torn}" fill="${C.beyond}" fill-rule="evenodd" pointer-events="none"/>
-  <path d="${torn}" fill="none" stroke="#2a1608" stroke-opacity="0.75" stroke-width="${L(1.6 * k)}" pointer-events="none"/>`;
+  <path d="${torn}" fill="none" stroke="#2a1608" stroke-opacity="0.75" stroke-width="${L(1.6 * k)}" pointer-events="none"/>` : ''}`;
 }
