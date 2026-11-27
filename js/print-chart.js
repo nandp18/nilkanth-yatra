@@ -229,7 +229,7 @@ export function fleur(cx, cy, size, fill) {
 // torn outline with dark ground beyond it. Drawn last, under the grain. A sheet that bleeds
 // to the trim goes without the edge, so nothing but the map reaches the paper's ends.
 export function agedSheet(W, H, { edge = true } = {}) {
-  const { C, f1: L } = kit, k = W / 1800, rnd = seeded(29);
+  const { C, f1: L } = kit, k = Math.min(W, H) / 1800, rnd = seeded(29);
   // the torn outline: a slow wander, fine jitter, a few tears and two bitten corners
   const ph = Array.from({ length: 6 }, () => rnd() * Math.PI * 2);
   const tears = Array.from({ length: 7 }, () => [rnd(), 0.004 + rnd() * 0.01, (10 + rnd() * 18) * k]);

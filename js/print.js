@@ -234,7 +234,7 @@ const latOfMerc = (m) => (2 * Math.atan(Math.exp(m)) - Math.PI / 2) / RAD;
 // Map layout: the frame fills the sheet inside the border, or the whole sheet when it's
 // borderless (fmt.border === false: full bleed, no neatline)
 function mapFrame(fmt) {
-  const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100), k = W / 1800;
+  const W = Math.round(fmt.w * 100), H = Math.round(fmt.h * 100), k = Math.min(W, H) / 1800;   // short side: same in landscape
   if (fmt.border === false) return { x: 0, y: 0, w: W, h: H };
   return { x: 104 * k, y: 104 * k, w: W - 208 * k, h: H - 208 * k };
 }

@@ -22,6 +22,7 @@ const state = {
   // city details switched on or off by hand; the rest follow the style's defaults (cityExtras)
   extras: Object.fromEntries(['landmarks', 'refs', 'streets', 'wards'].filter((k) => ['on', 'off'].includes(params.get(k))).map((k) => [k, params.get(k) === 'on'])),
   border: params.get('border') === 'off' ? 'off' : 'on',   // off: borderless sheet, for those who don't want the frame
+  orient: params.get('orient') === 'landscape' ? 'landscape' : 'portrait',   // Any place sheets can be turned on their side
   place: placeFromParams() || { lat: 28.817, lon: 83.872, title: 'Muktinath', sub: 'Mustang, Nepal' },
 };
 // A style can ask for its own title face (the Old chart's letterpress Fell); a face picked by
@@ -31,7 +32,13 @@ if (!faceChosen && STYLES[state.style].titleFace) state.face = STYLES[state.styl
 // The chosen sheet: its format, plus whether it has a border. Borderless map sheets bleed to the
 // edge, and so does every sheet in a style that always runs to the ends (fx.bleed: the Old chart)
 const bleeds = (style) => !!STYLES[style].fx.bleed;
-const sheetFormat = () => ({ ...FORMATS[state.fmt], border: state.border === 'on' && !bleeds(state.style) });
+// An Any place sheet in landscape is the same paper turned on its side: width and height swap.
+const landscape = () => state.mode === 'place' && state.orient === 'landscape';
+function sheetFormat() {
+  const f = { ...FORMATS[state.fmt], border: state.border === 'on' && !bleeds(state.style) };
+  if (!landscape()) return f;
+  return { ...f, w: f.h, h: f.w, label: `${f.label}, landscape`, ...(f.page ? { page: [f.page[1], f.page[0]] } : {}) };
+}
 function placeFromParams() {
   const [lat, lon] = (params.get('at') || '').split(',').map(Number);
   if (!params.get('at') || !(Math.abs(lat) <= 90) || !(Math.abs(lon) <= 180)) return null;
@@ -193,6 +200,7 @@ $('faces').innerHTML = Object.entries(TITLE_FACES).map(([k, f]) => chip('face', 
 $('modes').innerHTML = chip('mode', 'journey', 'The journey') + chip('mode', 'place', 'Any place');
 $('spans').innerHTML = Object.entries(SPANS).map(([k, s]) => chip('span', k, s.label)).join('');
 $('towns').innerHTML = chip('towns', 'on', 'Named') + chip('towns', 'off', 'Hidden');
+$('orients').innerHTML = chip('orient', 'portrait', 'Portrait') + chip('orient', 'landscape', 'Landscape');
 const EXTRAS = [['landmarks', 'Landmarks', 'Neighbourhoods in capitals, and churches, halls, museums and parks, each with a small drawn mark'],
   ['refs', 'Numbered landmarks', 'Landmarks with no room for a name get a number, listed under References'],
   ['streets', 'Street names', 'Avenues and main streets named along their course'], ['wards', 'Ward colours', 'A colour wash for each quarter']];
@@ -201,7 +209,7 @@ $('extras').innerHTML = EXTRAS.map(([k, label, tip]) => `<button class="chip" da
 $('boxes').innerHTML = [['auto', 'Auto', 'The corner with the least land under it'], ['tl', 'Top left'], ['tr', 'Top right'], ['bl', 'Bottom left'], ['br', 'Bottom right']]
   .map(([k, label, tip]) => chip('box', k, label, tip ? ` title="${tip}"` : '')).join('');
 $('borders').innerHTML = chip('border', 'on', 'Framed') + chip('border', 'off', 'Borderless');
-const GROUP_KEY = { style: 'style', layout: 'layout', region: 'region', fmt: 'fmt', face: 'face', mode: 'mode', span: 'span', towns: 'towns', box: 'box', border: 'border' };
+const GROUP_KEY = { style: 'style', layout: 'layout', region: 'region', fmt: 'fmt', face: 'face', mode: 'mode', span: 'span', towns: 'towns', box: 'box', border: 'border', orient: 'orient' };
 
 document.querySelector('.panel').addEventListener('click', (e) => {
   const t = e.target.closest('button[data-toggle]');
@@ -257,7 +265,7 @@ function syncChooser() {
   $('extras-row').hidden = !PLACE || SPANS[state.span].km > CITY_KM;
   if (document.activeElement !== $('place-title')) $('place-title').value = P.title;
   if (document.activeElement !== $('place-sub')) $('place-sub').value = P.sub;
-  $('summary').textContent = PLACE ? `${P.title} · ${STYLES[state.style].label} · ${f.short}`
+  $('summary').textContent = PLACE ? `${P.title} · ${STYLES[state.style].label} · ${f.short}${landscape() ? ' landscape' : ''}`
     : `${STYLES[state.style].label} · ${LAYOUTS[state.layout]}${state.layout === 'detail' ? ` (${DETAILS[state.region].label})` : ''} · ${f.short}`;
   // keep the address shareable
   const q = new URLSearchParams(PLACE
@@ -266,6 +274,7 @@ function syncChooser() {
   if (!PLACE && state.layout === 'detail') q.set('region', state.region);
   if (state.border === 'off') q.set('border', 'off');
   if (PLACE) for (const [k, on] of Object.entries(state.extras)) q.set(k, on ? 'on' : 'off');
+  if (landscape()) q.set('orient', 'landscape');
   if (state.face !== 'didone') q.set('title', state.face);
   history.replaceState(null, '', `?${q}`);
 }
@@ -491,7 +500,7 @@ $('btn-print').onclick = () => window.print();
 function fileBase() {
   const slug = state.place.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'map';
   const border = state.border === 'off' ? '-borderless' : '';
-  return state.mode === 'place' ? `${slug}-${state.style}-${state.fmt}${border}`
+  return state.mode === 'place' ? `${slug}-${state.style}-${state.fmt}${landscape() ? '-landscape' : ''}${border}`
     : `van-vicharan-${state.style}-${state.layout}${state.layout === 'detail' ? `-${state.region}` : ''}-${state.fmt}${border}`;
 }
 function saveBlob(blob, name) {
