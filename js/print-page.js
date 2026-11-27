@@ -24,8 +24,14 @@ const state = {
   border: params.get('border') === 'off' ? 'off' : 'on',   // off: borderless sheet, for those who don't want the frame
   place: placeFromParams() || { lat: 28.817, lon: 83.872, title: 'Muktinath', sub: 'Mustang, Nepal' },
 };
-// The chosen sheet: its format, plus whether it has a border. Borderless map sheets bleed to the edge.
-const sheetFormat = () => ({ ...FORMATS[state.fmt], border: state.border === 'on' });
+// A style can ask for its own title face (the Old chart's letterpress Fell); a face picked by
+// hand, here or in the link, wins over it
+let faceChosen = !!TITLE_FACES[params.get('title')];
+if (!faceChosen && STYLES[state.style].titleFace) state.face = STYLES[state.style].titleFace;
+// The chosen sheet: its format, plus whether it has a border. Borderless map sheets bleed to the
+// edge, and so does every sheet in a style that always runs to the ends (fx.bleed: the Old chart)
+const bleeds = (style) => !!STYLES[style].fx.bleed;
+const sheetFormat = () => ({ ...FORMATS[state.fmt], border: state.border === 'on' && !bleeds(state.style) });
 function placeFromParams() {
   const [lat, lon] = (params.get('at') || '').split(',').map(Number);
   if (!params.get('at') || !(Math.abs(lat) <= 90) || !(Math.abs(lon) <= 180)) return null;
@@ -210,6 +216,8 @@ document.querySelector('.panel').addEventListener('click', (e) => {
   const key = GROUP_KEY[b.dataset.group];
   if (state[key] === b.dataset.v) return;
   state[key] = b.dataset.v;
+  if (key === 'face') faceChosen = true;
+  if (key === 'style' && !faceChosen) state.face = STYLES[state.style].titleFace || 'didone';
   render();
 });
 // arrow keys move within a group, like a radio group
@@ -227,6 +235,13 @@ function syncChooser() {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', on);
     b.tabIndex = on ? 0 : -1;
+  }
+  // a style that always bleeds to the edges shows Borderless, with the choice set aside
+  for (const b of document.querySelectorAll('.panel button[data-group="border"]')) {
+    if (!bleeds(state.style)) { b.disabled = false; continue; }
+    b.disabled = true;
+    b.classList.toggle('on', b.dataset.v === 'off');
+    b.setAttribute('aria-checked', b.dataset.v === 'off');
   }
   $('region-row').hidden = state.layout !== 'detail';
   const X = extrasNow();
@@ -280,7 +295,7 @@ const thumbs = {
     try {
       if (!this.done.has(key)) {
         const zoom = l === 'detail' ? 6 : 5;
-        const svg = await drawSheet({ ...THUMB, border: border === 'on' }, 'didone', s, l, 'north', { zoom });
+        const svg = await drawSheet({ ...THUMB, border: border === 'on' && !bleeds(s) }, 'didone', s, l, 'north', { zoom });
         this.done.set(key, await rasterize(svg, 300, 400));
         this.paint();
       }

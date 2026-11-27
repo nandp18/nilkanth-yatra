@@ -227,9 +227,10 @@ export function fleur(cx, cy, size, fill) {
 }
 
 // ---------- The aged sheet ----------
-// Stains and fold creases over the picture, a darkened, burnt edge, and the torn outline
-// with dark ground beyond it. Drawn last, under the grain.
-export function agedSheet(W, H) {
+// Stains and fold creases over the picture and, with `edge`, a darkened, burnt edge and the
+// torn outline with dark ground beyond it. Drawn last, under the grain. A sheet that bleeds
+// to the trim goes without the edge, so nothing but the map reaches the paper's ends.
+export function agedSheet(W, H, { edge = true } = {}) {
   const { C, f1: L } = kit, k = W / 1800, rnd = seeded(29);
   // the torn outline: a slow wander, fine jitter, a few tears and two bitten corners
   const ph = Array.from({ length: 6 }, () => rnd() * Math.PI * 2);
@@ -269,7 +270,7 @@ export function agedSheet(W, H) {
   </defs>
   <g filter="url(#stainEdge)" pointer-events="none">${stains}</g>
   <g filter="url(#creaseBlur)" pointer-events="none">${crease(`M${L(W / 2)},0V${H}`, 3 * k, 0)}${crease(`M0,${L(H / 2)}H${W}`, 0, 3 * k)}</g>
-  <g clip-path="url(#sheetEdge)" pointer-events="none"><path d="${torn}" fill="none" stroke="${C.burn}" stroke-opacity="0.6" stroke-width="${L(44 * k)}" filter="url(#burnBlur)"/></g>
+  ${edge ? `<g clip-path="url(#sheetEdge)" pointer-events="none"><path d="${torn}" fill="none" stroke="${C.burn}" stroke-opacity="0.6" stroke-width="${L(44 * k)}" filter="url(#burnBlur)"/></g>
   <path d="M0,0H${W}V${H}H0Z ${torn}" fill="${C.beyond}" fill-rule="evenodd" pointer-events="none"/>
-  <path d="${torn}" fill="none" stroke="#2a1608" stroke-opacity="0.75" stroke-width="${L(1.6 * k)}" pointer-events="none"/>`;
+  <path d="${torn}" fill="none" stroke="#2a1608" stroke-opacity="0.75" stroke-width="${L(1.6 * k)}" pointer-events="none"/>` : ''}`;
 }
